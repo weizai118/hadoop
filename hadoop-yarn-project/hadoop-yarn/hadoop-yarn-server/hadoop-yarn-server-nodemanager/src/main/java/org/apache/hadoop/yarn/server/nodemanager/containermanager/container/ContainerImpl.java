@@ -384,7 +384,7 @@ public class ContainerImpl implements Container {
        UPDATE_DIAGNOSTICS_TRANSITION)
     .addTransition(ContainerState.SCHEDULED, ContainerState.KILLING,
         ContainerEventType.KILL_CONTAINER,
-        new KillBeforeRunningTransition())
+        new KillTransition())
     .addTransition(ContainerState.SCHEDULED, ContainerState.SCHEDULED,
         ContainerEventType.UPDATE_CONTAINER_TOKEN,
         new NotifyContainerSchedulerOfUpdateTransition())
@@ -618,6 +618,9 @@ public class ContainerImpl implements Container {
     .addTransition(ContainerState.EXITED_WITH_SUCCESS,
         ContainerState.EXITED_WITH_SUCCESS,
         ContainerEventType.UPDATE_CONTAINER_TOKEN)
+    .addTransition(ContainerState.EXITED_WITH_SUCCESS,
+        ContainerState.EXITED_WITH_SUCCESS,
+        ContainerEventType.CONTAINER_KILLED_ON_REQUEST)
 
     // From EXITED_WITH_FAILURE State
     .addTransition(ContainerState.EXITED_WITH_FAILURE, ContainerState.DONE,
@@ -635,6 +638,9 @@ public class ContainerImpl implements Container {
     .addTransition(ContainerState.EXITED_WITH_FAILURE,
         ContainerState.EXITED_WITH_FAILURE,
         ContainerEventType.UPDATE_CONTAINER_TOKEN)
+    .addTransition(ContainerState.EXITED_WITH_FAILURE,
+        ContainerState.EXITED_WITH_FAILURE,
+        ContainerEventType.CONTAINER_KILLED_ON_REQUEST)
 
     // From KILLING State.
     .addTransition(ContainerState.KILLING,
@@ -694,6 +700,9 @@ public class ContainerImpl implements Container {
     .addTransition(ContainerState.CONTAINER_CLEANEDUP_AFTER_KILL,
         ContainerState.CONTAINER_CLEANEDUP_AFTER_KILL,
         ContainerEventType.UPDATE_CONTAINER_TOKEN)
+    .addTransition(ContainerState.CONTAINER_CLEANEDUP_AFTER_KILL,
+        ContainerState.CONTAINER_CLEANEDUP_AFTER_KILL,
+        ContainerEventType.CONTAINER_KILLED_ON_REQUEST)
 
     // From DONE
     .addTransition(ContainerState.DONE, ContainerState.DONE,
@@ -714,6 +723,8 @@ public class ContainerImpl implements Container {
     // No transition - assuming container is on its way to completion
     .addTransition(ContainerState.DONE, ContainerState.DONE,
         ContainerEventType.UPDATE_CONTAINER_TOKEN)
+    .addTransition(ContainerState.DONE, ContainerState.DONE,
+        ContainerEventType.CONTAINER_KILLED_ON_REQUEST)
 
     // create the topology tables
     .installTopology();
@@ -923,10 +934,21 @@ public class ContainerImpl implements Container {
     this.workDir = workDir;
   }
 
+  private void clearIpAndHost() {
+    LOG.info("{} clearing ip and host", containerId);
+    this.ips = null;
+    this.host = null;
+  }
+
   @Override
   public void setIpAndHost(String[] ipAndHost) {
-    this.ips = ipAndHost[0];
-    this.host = ipAndHost[1];
+    try {
+      this.writeLock.lock();
+      this.ips = ipAndHost[0];
+      this.host = ipAndHost[1];
+    } finally {
+      this.writeLock.unlock();
+    }
   }
 
   @Override
@@ -1533,6 +1555,7 @@ public class ContainerImpl implements Container {
       // TODO: Add containerWorkDir to the deletion service.
 
       if (DockerLinuxContainerRuntime.isDockerContainerRequested(
+          container.daemonConf,
           container.getLaunchContext().getEnvironment())) {
         removeDockerContainer(container);
       }
@@ -1573,6 +1596,7 @@ public class ContainerImpl implements Container {
       // TODO: Add containerOuputDir to the deletion service.
 
       if (DockerLinuxContainerRuntime.isDockerContainerRequested(
+          container.daemonConf,
           container.getLaunchContext().getEnvironment())) {
         removeDockerContainer(container);
       }
@@ -1640,10 +1664,17 @@ public class ContainerImpl implements Container {
 
     private void doRelaunch(final ContainerImpl container,
         int remainingRetryAttempts, final int retryInterval) {
-      LOG.info("Relaunching Container " + container.getContainerId()
-          + ". Remaining retry attempts(after relaunch) : "
-          + remainingRetryAttempts + ". Interval between retries is "
-          + retryInterval + "ms");
+      if (remainingRetryAttempts == ContainerRetryContext.RETRY_FOREVER) {
+        LOG.info("Relaunching Container {}. " +
+                "retry interval {} ms", container.getContainerId(),
+            retryInterval);
+      } else {
+        LOG.info("Relaunching Container {}. " +
+                "remaining retry attempts(after relaunch) {}, " +
+                "retry interval {} ms", container.getContainerId(),
+            remainingRetryAttempts, retryInterval);
+      }
+
       container.wasLaunched  = false;
       container.metrics.endRunningContainer();
       if (retryInterval == 0) {
@@ -1709,7 +1740,11 @@ public class ContainerImpl implements Container {
           + "] for re-initialization !!");
       container.wasLaunched  = false;
       container.metrics.endRunningContainer();
-
+      container.clearIpAndHost();
+      // Remove the container from the resource-monitor. When container
+      // is launched again, it is added back to monitoring service.
+      container.dispatcher.getEventHandler().handle(
+          new ContainerStopMonitoringEvent(container.containerId, true));
       container.launchContext = container.reInitContext.newLaunchContext;
 
       // Re configure the Retry Context
@@ -1847,6 +1882,7 @@ public class ContainerImpl implements Container {
       }
 
       if (DockerLinuxContainerRuntime.isDockerContainerRequested(
+          container.daemonConf,
           container.getLaunchContext().getEnvironment())) {
         removeDockerContainer(container);
       }
@@ -1873,7 +1909,7 @@ public class ContainerImpl implements Container {
       if (container.containerMetrics != null) {
         container.containerMetrics
             .recordFinishTimeAndExitCode(clock.getTime(), container.exitCode);
-        container.containerMetrics.finished();
+        container.containerMetrics.finished(false);
       }
       container.sendFinishedEvents();
 

@@ -18,7 +18,11 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import org.apache.ratis.shaded.com.google.protobuf.ByteString;
+import org.apache.hadoop.hdds.scm.container.common.helpers
+    .StorageContainerException;
+import org.apache.hadoop.ozone.common.Checksum;
+import org.apache.hadoop.ozone.common.ChecksumData;
+import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
@@ -65,7 +69,8 @@ public class ChunkInputStream extends InputStream implements Seekable {
    * @param chunks list of chunks to read
    * @param traceID container protocol call traceID
    */
-  public ChunkInputStream(BlockID blockID, XceiverClientManager xceiverClientManager,
+  public ChunkInputStream(
+      BlockID blockID, XceiverClientManager xceiverClientManager,
       XceiverClientSpi xceiverClient, List<ChunkInfo> chunks, String traceID) {
     this.blockID = blockID;
     this.traceID = traceID;
@@ -82,7 +87,7 @@ public class ChunkInputStream extends InputStream implements Seekable {
   }
 
   private void initializeChunkOffset() {
-    int tempOffset = 0;
+    long tempOffset = 0;
     for (int i = 0; i < chunks.size(); i++) {
       chunkOffset[i] = tempOffset;
       tempOffset += chunks.get(i).getLen();
@@ -120,12 +125,17 @@ public class ChunkInputStream extends InputStream implements Seekable {
       return 0;
     }
     checkOpen();
-    int available = prepareRead(len);
-    if (available == EOF) {
-      return EOF;
+    int total = 0;
+    while (len > 0) {
+      int available = prepareRead(len);
+      if (available == EOF) {
+        return total != 0 ? total : EOF;
+      }
+      buffers.get(bufferIndex).get(b, off + total, available);
+      len -= available;
+      total += available;
     }
-    buffers.get(bufferIndex).get(b, off, available);
-    return available;
+    return total;
   }
 
   @Override
@@ -195,13 +205,27 @@ public class ChunkInputStream extends InputStream implements Seekable {
     // next chunk
     chunkIndex += 1;
     final ReadChunkResponseProto readChunkResponse;
+    final ChunkInfo chunkInfo = chunks.get(chunkIndex);
     try {
-      readChunkResponse = ContainerProtocolCalls.readChunk(xceiverClient,
-          chunks.get(chunkIndex), blockID, traceID);
+      readChunkResponse = ContainerProtocolCalls
+          .readChunk(xceiverClient, chunkInfo, blockID, traceID);
     } catch (IOException e) {
+      if (e instanceof StorageContainerException) {
+        throw e;
+      }
       throw new IOException("Unexpected OzoneException: " + e.toString(), e);
     }
     ByteString byteString = readChunkResponse.getData();
+    if (byteString.size() != chunkInfo.getLen()) {
+      // Bytes read from chunk should be equal to chunk size.
+      throw new IOException(String
+          .format("Inconsistent read for chunk=%s len=%d bytesRead=%d",
+              chunkInfo.getChunkName(), chunkInfo.getLen(), byteString.size()));
+    }
+    ChecksumData checksumData = ChecksumData.getFromProtoBuf(
+        chunkInfo.getChecksumData());
+    Checksum.verifyChecksum(byteString, checksumData);
+
     buffers = byteString.asReadOnlyByteBufferList();
     bufferIndex = 0;
   }
@@ -211,8 +235,8 @@ public class ChunkInputStream extends InputStream implements Seekable {
     if (pos < 0 || (chunks.size() == 0 && pos > 0)
         || pos >= chunkOffset[chunks.size() - 1] + chunks.get(chunks.size() - 1)
         .getLen()) {
-      throw new EOFException(
-          "EOF encountered pos: " + pos + " container key: " + blockID.getLocalID());
+      throw new EOFException("EOF encountered pos: " + pos + " container key: "
+          + blockID.getLocalID());
     }
     if (chunkIndex == -1) {
       chunkIndex = Arrays.binarySearch(chunkOffset, pos);
@@ -258,5 +282,9 @@ public class ChunkInputStream extends InputStream implements Seekable {
   @Override
   public boolean seekToNewSource(long targetPos) throws IOException {
     return false;
+  }
+
+  public BlockID getBlockID() {
+    return blockID;
   }
 }

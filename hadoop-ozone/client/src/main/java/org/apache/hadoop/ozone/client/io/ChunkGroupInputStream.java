@@ -22,7 +22,9 @@ import org.apache.hadoop.fs.FSExceptionMessages;
 import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
@@ -71,7 +73,7 @@ public class ChunkGroupInputStream extends InputStream implements Seekable {
   }
 
   @VisibleForTesting
-  public long getRemainingOfIndex(int index) {
+  public long getRemainingOfIndex(int index) throws IOException {
     return streamEntries.get(index).getRemaining();
   }
 
@@ -111,24 +113,30 @@ public class ChunkGroupInputStream extends InputStream implements Seekable {
     }
     int totalReadLen = 0;
     while (len > 0) {
-      if (streamEntries.size() <= currentStreamIndex) {
+      // if we are at the last block and have read the entire block, return
+      if (streamEntries.size() == 0 ||
+              (streamEntries.size() - 1 <= currentStreamIndex &&
+                      streamEntries.get(currentStreamIndex)
+                              .getRemaining() == 0)) {
         return totalReadLen == 0 ? EOF : totalReadLen;
       }
       ChunkInputStreamEntry current = streamEntries.get(currentStreamIndex);
-      int readLen = Math.min(len, (int)current.getRemaining());
-      int actualLen = current.read(b, off, readLen);
-      // this means the underlying stream has nothing at all, return
-      if (actualLen == EOF) {
-        return totalReadLen > 0 ? totalReadLen : EOF;
+      int numBytesToRead = Math.min(len, (int)current.getRemaining());
+      int numBytesRead = current.read(b, off, numBytesToRead);
+      if (numBytesRead != numBytesToRead) {
+        // This implies that there is either data loss or corruption in the
+        // chunk entries. Even EOF in the current stream would be covered in
+        // this case.
+        throw new IOException(String.format(
+            "Inconsistent read for blockID=%s length=%d numBytesRead=%d",
+            current.chunkInputStream.getBlockID(), current.length,
+            numBytesRead));
       }
-      totalReadLen += actualLen;
-      // this means there is no more data to read beyond this point, return
-      if (actualLen != readLen) {
-        return totalReadLen;
-      }
-      off += readLen;
-      len -= readLen;
-      if (current.getRemaining() <= 0) {
+      totalReadLen += numBytesRead;
+      off += numBytesRead;
+      len -= numBytesRead;
+      if (current.getRemaining() <= 0 &&
+        ((currentStreamIndex + 1) < streamEntries.size())) {
         currentStreamIndex += 1;
       }
     }
@@ -206,31 +214,27 @@ public class ChunkGroupInputStream extends InputStream implements Seekable {
 
     private final ChunkInputStream chunkInputStream;
     private final long length;
-    private long currentPosition;
 
     public ChunkInputStreamEntry(ChunkInputStream chunkInputStream,
         long length) {
       this.chunkInputStream = chunkInputStream;
       this.length = length;
-      this.currentPosition = 0;
     }
 
-    synchronized long getRemaining() {
-      return length - currentPosition;
+    synchronized long getRemaining() throws IOException {
+      return length - getPos();
     }
 
     @Override
     public synchronized int read(byte[] b, int off, int len)
         throws IOException {
       int readLen = chunkInputStream.read(b, off, len);
-      currentPosition += readLen;
       return readLen;
     }
 
     @Override
     public synchronized int read() throws IOException {
       int data = chunkInputStream.read();
-      currentPosition += 1;
       return data;
     }
 
@@ -274,8 +278,16 @@ public class ChunkGroupInputStream extends InputStream implements Seekable {
       long containerID = blockID.getContainerID();
       ContainerWithPipeline containerWithPipeline =
           storageContainerLocationClient.getContainerWithPipeline(containerID);
+      Pipeline pipeline = containerWithPipeline.getPipeline();
+
+      // irrespective of the container state, we will always read via Standalone
+      // protocol.
+      if (pipeline.getType() != HddsProtos.ReplicationType.STAND_ALONE) {
+        pipeline = Pipeline.newBuilder(pipeline)
+            .setType(HddsProtos.ReplicationType.STAND_ALONE).build();
+      }
       XceiverClientSpi xceiverClient = xceiverClientManager
-          .acquireClient(containerWithPipeline.getPipeline(), containerID);
+          .acquireClient(pipeline);
       boolean success = false;
       containerKey = omKeyLocationInfo.getLocalID();
       try {
@@ -284,10 +296,10 @@ public class ChunkGroupInputStream extends InputStream implements Seekable {
         groupInputStream.streamOffset[i] = length;
         ContainerProtos.DatanodeBlockID datanodeBlockID = blockID
             .getDatanodeBlockIDProtobuf();
-        ContainerProtos.GetKeyResponseProto response = ContainerProtocolCalls
-            .getKey(xceiverClient, datanodeBlockID, requestId);
+        ContainerProtos.GetBlockResponseProto response = ContainerProtocolCalls
+            .getBlock(xceiverClient, datanodeBlockID, requestId);
         List<ContainerProtos.ChunkInfo> chunks =
-            response.getKeyData().getChunksList();
+            response.getBlockData().getChunksList();
         for (ContainerProtos.ChunkInfo chunk : chunks) {
           length += chunk.getLen();
         }

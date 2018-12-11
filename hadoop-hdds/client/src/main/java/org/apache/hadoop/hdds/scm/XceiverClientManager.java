@@ -25,7 +25,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hdds.scm.container.common.helpers.Pipeline;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 
 import java.io.Closeable;
@@ -58,9 +58,8 @@ public class XceiverClientManager implements Closeable {
 
   //TODO : change this to SCM configuration class
   private final Configuration conf;
-  private final Cache<Long, XceiverClientSpi> clientCache;
+  private final Cache<String, XceiverClientSpi> clientCache;
   private final boolean useRatis;
-  private final boolean useGrpc;
 
   private static XceiverClientMetrics metrics;
   /**
@@ -78,17 +77,15 @@ public class XceiverClientManager implements Closeable {
     this.useRatis = conf.getBoolean(
         ScmConfigKeys.DFS_CONTAINER_RATIS_ENABLED_KEY,
         ScmConfigKeys.DFS_CONTAINER_RATIS_ENABLED_DEFAULT);
-    this.useGrpc = conf.getBoolean(ScmConfigKeys.DFS_CONTAINER_GRPC_ENABLED_KEY,
-        ScmConfigKeys.DFS_CONTAINER_GRPC_ENABLED_DEFAULT);
     this.conf = conf;
     this.clientCache = CacheBuilder.newBuilder()
         .expireAfterAccess(staleThresholdMs, TimeUnit.MILLISECONDS)
         .maximumSize(maxSize)
         .removalListener(
-            new RemovalListener<Long, XceiverClientSpi>() {
+            new RemovalListener<String, XceiverClientSpi>() {
             @Override
             public void onRemoval(
-                RemovalNotification<Long, XceiverClientSpi>
+                RemovalNotification<String, XceiverClientSpi>
                   removalNotification) {
               synchronized (clientCache) {
                 // Mark the entry as evicted
@@ -100,7 +97,7 @@ public class XceiverClientManager implements Closeable {
   }
 
   @VisibleForTesting
-  public Cache<Long, XceiverClientSpi> getClientCache() {
+  public Cache<String, XceiverClientSpi> getClientCache() {
     return clientCache;
   }
 
@@ -115,14 +112,14 @@ public class XceiverClientManager implements Closeable {
    * @return XceiverClientSpi connected to a container
    * @throws IOException if a XceiverClientSpi cannot be acquired
    */
-  public XceiverClientSpi acquireClient(Pipeline pipeline, long containerID)
+  public XceiverClientSpi acquireClient(Pipeline pipeline)
       throws IOException {
     Preconditions.checkNotNull(pipeline);
-    Preconditions.checkArgument(pipeline.getMachines() != null);
-    Preconditions.checkArgument(!pipeline.getMachines().isEmpty());
+    Preconditions.checkArgument(pipeline.getNodes() != null);
+    Preconditions.checkArgument(!pipeline.getNodes().isEmpty());
 
     synchronized (clientCache) {
-      XceiverClientSpi info = getClient(pipeline, containerID);
+      XceiverClientSpi info = getClient(pipeline);
       info.incrementReference();
       return info;
     }
@@ -140,25 +137,25 @@ public class XceiverClientManager implements Closeable {
     }
   }
 
-  private XceiverClientSpi getClient(Pipeline pipeline, long containerID)
+  private XceiverClientSpi getClient(Pipeline pipeline)
       throws IOException {
+    HddsProtos.ReplicationType type = pipeline.getType();
     try {
-      return clientCache.get(containerID,
+      return clientCache.get(pipeline.getId().getId().toString() + type,
           new Callable<XceiverClientSpi>() {
           @Override
           public XceiverClientSpi call() throws Exception {
             XceiverClientSpi client = null;
-            switch (pipeline.getType()) {
+            switch (type) {
             case RATIS:
               client = XceiverClientRatis.newXceiverClientRatis(pipeline, conf);
               break;
             case STAND_ALONE:
-              client = useGrpc ? new XceiverClientGrpc(pipeline, conf) :
-                  new XceiverClient(pipeline, conf);
+              client = new XceiverClientGrpc(pipeline, conf);
               break;
             case CHAINED:
             default:
-              throw new IOException ("not implemented" + pipeline.getType());
+              throw new IOException("not implemented" + pipeline.getType());
             }
             client.connect();
             return client;
@@ -173,6 +170,7 @@ public class XceiverClientManager implements Closeable {
   /**
    * Close and remove all the cached clients.
    */
+  @Override
   public void close() {
     //closing is done through RemovalListener
     clientCache.invalidateAll();

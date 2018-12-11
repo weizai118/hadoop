@@ -80,8 +80,11 @@ public class TestGpuResourceHandler {
     mockPrivilegedExecutor = mock(PrivilegedOperationExecutor.class);
     mockNMStateStore = mock(NMStateStoreService.class);
 
+    Configuration conf = new Configuration();
+
     Context nmctx = mock(Context.class);
     when(nmctx.getNMStateStore()).thenReturn(mockNMStateStore);
+    when(nmctx.getConf()).thenReturn(conf);
     runningContainersMap = new ConcurrentHashMap<>();
     when(nmctx.getContainers()).thenReturn(runningContainersMap);
 
@@ -121,7 +124,8 @@ public class TestGpuResourceHandler {
     ContainerLaunchContext clc = mock(ContainerLaunchContext.class);
     Map<String, String> env = new HashMap<>();
     if (dockerContainerEnabled) {
-      env.put(ContainerRuntimeConstants.ENV_CONTAINER_TYPE, "docker");
+      env.put(ContainerRuntimeConstants.ENV_CONTAINER_TYPE,
+          ContainerRuntimeConstants.CONTAINER_RUNTIME_DOCKER);
     }
     when(clc.getEnvironment()).thenReturn(env);
     when(c.getLaunchContext()).thenReturn(clc);
@@ -347,15 +351,17 @@ public class TestGpuResourceHandler {
   public void testAllocationStoredWithNULLStateStore() throws Exception {
     NMNullStateStoreService mockNMNULLStateStore = mock(NMNullStateStoreService.class);
 
+    Configuration conf = new YarnConfiguration();
+    conf.set(YarnConfiguration.NM_GPU_ALLOWED_DEVICES, "0:0,1:1,2:3,3:4");
+
     Context nmnctx = mock(Context.class);
     when(nmnctx.getNMStateStore()).thenReturn(mockNMNULLStateStore);
+    when(nmnctx.getConf()).thenReturn(conf);
 
     GpuResourceHandlerImpl gpuNULLStateResourceHandler =
         new GpuResourceHandlerImpl(nmnctx, mockCGroupsHandler,
         mockPrivilegedExecutor);
 
-    Configuration conf = new YarnConfiguration();
-    conf.set(YarnConfiguration.NM_GPU_ALLOWED_DEVICES, "0:0,1:1,2:3,3:4");
     GpuDiscoverer.getInstance().initialize(conf);
 
     gpuNULLStateResourceHandler.bootstrap(conf);
@@ -459,7 +465,7 @@ public class TestGpuResourceHandler {
       caughtException = true;
     }
     Assert.assertTrue(
-        "Should fail since requested device Id is not in allowed list",
+        "Should fail since requested device Id is already assigned",
         caughtException);
 
     // Make sure internal state not changed.

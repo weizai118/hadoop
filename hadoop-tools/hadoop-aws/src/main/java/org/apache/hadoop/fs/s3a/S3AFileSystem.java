@@ -77,8 +77,9 @@ import com.amazonaws.event.ProgressListener;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.ListeningExecutorService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
@@ -123,9 +124,6 @@ import static org.apache.hadoop.fs.s3a.S3AUtils.*;
 import static org.apache.hadoop.fs.s3a.Statistic.*;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.isNotEmpty;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The core S3A Filesystem implementation.
@@ -205,17 +203,22 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
   private boolean useListV1;
   private MagicCommitIntegration committerIntegration;
 
+  private AWSCredentialProviderList credentials;
+
+  private S3Guard.ITtlTimeProvider ttlTimeProvider;
+
   /** Add any deprecated keys. */
   @SuppressWarnings("deprecation")
   private static void addDeprecatedKeys() {
-    Configuration.addDeprecations(
-        new Configuration.DeprecationDelta[]{
-            // never shipped in an ASF release, but did get into the wild.
-            new Configuration.DeprecationDelta(
-                OLD_S3A_SERVER_SIDE_ENCRYPTION_KEY,
-                SERVER_SIDE_ENCRYPTION_KEY)
-        });
-    Configuration.reloadExistingConfigurations();
+    // this is retained as a placeholder for when new deprecated keys
+    // need to be added.
+    Configuration.DeprecationDelta[] deltas = {
+    };
+
+    if (deltas.length > 0) {
+      Configuration.addDeprecations(deltas);
+      Configuration.reloadExistingConfigurations();
+    }
   }
 
   static {
@@ -252,8 +255,10 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
       Class<? extends S3ClientFactory> s3ClientFactoryClass = conf.getClass(
           S3_CLIENT_FACTORY_IMPL, DEFAULT_S3_CLIENT_FACTORY_IMPL,
           S3ClientFactory.class);
+
+      credentials = createAWSCredentialProviderSet(name, conf);
       s3 = ReflectionUtils.newInstance(s3ClientFactoryClass, conf)
-          .createS3Client(name);
+          .createS3Client(name, bucket, credentials);
       invoker = new Invoker(new S3ARetryPolicy(getConf()), onRetry);
       s3guardInvoker = new Invoker(new S3GuardExistsRetryPolicy(getConf()),
           onRetry);
@@ -342,6 +347,9 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
             getMetadataStore(), allowAuthoritative);
       }
       initMultipartUploads(conf);
+      long authDirTtl = conf.getLong(METADATASTORE_AUTHORITATIVE_DIR_TTL,
+          DEFAULT_METADATASTORE_AUTHORITATIVE_DIR_TTL);
+      ttlTimeProvider = new S3Guard.TtlTimeProvider(authDirTtl);
     } catch (AmazonClientException e) {
       throw translateException("initializing ", new Path(name), e);
     }
@@ -1128,6 +1136,7 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
 
   /**
    * Increment a statistic by 1.
+   * This increments both the instrumentation and storage statistics.
    * @param statistic The operation to increment
    */
   protected void incrementStatistic(Statistic statistic) {
@@ -1136,6 +1145,7 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
 
   /**
    * Increment a statistic by a specific value.
+   * This increments both the instrumentation and storage statistics.
    * @param statistic The operation to increment
    * @param count the count to increment
    */
@@ -1172,8 +1182,7 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
     Statistic stat = isThrottleException(ex)
         ? STORE_IO_THROTTLED
         : IGNORED_ERRORS;
-    instrumentation.incrementCounter(stat, 1);
-    storageStatistics.incrementCounter(stat, 1);
+    incrementStatistic(stat);
   }
 
   /**
@@ -1194,6 +1203,11 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
   /**
    * Callback from {@link Invoker} when an operation against a metastore
    * is retried.
+   * Always increments the {@link Statistic#S3GUARD_METADATASTORE_RETRY}
+   * statistic/counter;
+   * if it is a throttling exception will update the associated
+   * throttled metrics/statistics.
+   *
    * @param ex exception
    * @param retries number of retries
    * @param idempotent is the method idempotent
@@ -1202,6 +1216,11 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
       int retries,
       boolean idempotent) {
     operationRetried(ex);
+    incrementStatistic(S3GUARD_METADATASTORE_RETRY);
+    if (isThrottleException(ex)) {
+      incrementStatistic(S3GUARD_METADATASTORE_THROTTLED);
+      instrumentation.addValueToQuantiles(S3GUARD_METADATASTORE_THROTTLE_RATE, 1);
+    }
   }
 
   /**
@@ -1807,16 +1826,20 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
    */
   private boolean rejectRootDirectoryDelete(S3AFileStatus status,
       boolean recursive) throws IOException {
-    LOG.info("s3a delete the {} root directory of {}", bucket, recursive);
+    LOG.info("s3a delete the {} root directory. Path: {}. Recursive: {}",
+        bucket, status.getPath(), recursive);
     boolean emptyRoot = status.isEmptyDirectory() == Tristate.TRUE;
     if (emptyRoot) {
       return true;
     }
     if (recursive) {
+      LOG.error("Cannot delete root path: {}", status.getPath());
       return false;
     } else {
       // reject
-      throw new PathIOException(bucket, "Cannot delete root path");
+      String msg = "Cannot delete root path: " + status.getPath();
+      LOG.error(msg);
+      throw new PathIOException(bucket, msg);
     }
   }
 
@@ -1893,7 +1916,8 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
         key = key + '/';
       }
 
-      DirListingMetadata dirMeta = metadataStore.listChildren(path);
+      DirListingMetadata dirMeta =
+          S3Guard.listChildrenWithTtl(metadataStore, path, ttlTimeProvider);
       if (allowAuthoritative && dirMeta != null && dirMeta.isAuthoritative()) {
         return S3Guard.dirMetaToStatuses(dirMeta);
       }
@@ -1911,7 +1935,7 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
         result.add(files.next());
       }
       return S3Guard.dirListingUnion(metadataStore, path, result, dirMeta,
-          allowAuthoritative);
+          allowAuthoritative, ttlTimeProvider);
     } else {
       LOG.debug("Adding: rd (not a dir): {}", path);
       FileStatus[] stats = new FileStatus[1];
@@ -2121,7 +2145,8 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
           // We have a definitive true / false from MetadataStore, we are done.
           return S3AFileStatus.fromFileStatus(msStatus, pm.isEmptyDirectory());
         } else {
-          DirListingMetadata children = metadataStore.listChildren(path);
+          DirListingMetadata children =
+              S3Guard.listChildrenWithTtl(metadataStore, path, ttlTimeProvider);
           if (children != null) {
             tombstones = children.listTombstones();
           }
@@ -2336,7 +2361,10 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
   @Override
   public void copyFromLocalFile(boolean delSrc, boolean overwrite, Path src,
       Path dst) throws IOException {
-    innerCopyFromLocalFile(delSrc, overwrite, src, dst);
+    entryPoint(INVOCATION_COPY_FROM_LOCAL_FILE);
+    LOG.debug("Copying local file from {} to {}", src, dst);
+//    innerCopyFromLocalFile(delSrc, overwrite, src, dst);
+    super.copyFromLocalFile(delSrc, overwrite, src, dst);
   }
 
   /**
@@ -2346,6 +2374,9 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
    * This version doesn't need to create a temporary file to calculate the md5.
    * Sadly this doesn't seem to be used by the shell cp :(
    *
+   * <i>HADOOP-15932:</i> this method has been unwired from
+   * {@link #copyFromLocalFile(boolean, boolean, Path, Path)} until
+   * it is extended to list and copy whole directories.
    * delSrc indicates if the source should be removed
    * @param delSrc whether to delete the src
    * @param overwrite whether to overwrite an existing file
@@ -2428,11 +2459,14 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
    * Wait for an upload to complete.
    * If the waiting for completion is interrupted, the upload will be
    * aborted before an {@code InterruptedIOException} is thrown.
-   * @param upload upload to wait for
+   * If the upload (or its result collection) failed, this is where
+   * the failure is raised as an AWS exception
    * @param key destination key
+   * @param uploadInfo upload to wait for
    * @return the upload result
    * @throws InterruptedIOException if the blocking was interrupted.
    */
+  @Retries.OnceRaw
   UploadResult waitForUploadCompletion(String key, UploadInfo uploadInfo)
       throws InterruptedIOException {
     Upload upload = uploadInfo.getUpload();
@@ -2470,12 +2504,11 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
         transfers.shutdownNow(true);
         transfers = null;
       }
-      if (metadataStore != null) {
-        metadataStore.close();
-        metadataStore = null;
-      }
-      IOUtils.closeQuietly(instrumentation);
+      S3AUtils.closeAll(LOG, metadataStore, instrumentation);
+      metadataStore = null;
       instrumentation = null;
+      closeAutocloseables(LOG, credentials);
+      credentials = null;
     }
   }
 
@@ -2885,6 +2918,7 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
     }
     sb.append(", boundedExecutor=").append(boundedThreadPool);
     sb.append(", unboundedExecutor=").append(unboundedThreadPool);
+    sb.append(", credentials=").append(credentials);
     sb.append(", statistics {")
         .append(statistics)
         .append("}");
@@ -3108,7 +3142,8 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
           tombstones = metadataStoreListFilesIterator.listTombstones();
           cachedFilesIterator = metadataStoreListFilesIterator;
         } else {
-          DirListingMetadata meta = metadataStore.listChildren(path);
+          DirListingMetadata meta =
+              S3Guard.listChildrenWithTtl(metadataStore, path, ttlTimeProvider);
           if (meta != null) {
             tombstones = meta.listTombstones();
           } else {
@@ -3181,7 +3216,9 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
             final String key = maybeAddTrailingSlash(pathToKey(path));
             final Listing.FileStatusAcceptor acceptor =
                 new Listing.AcceptAllButSelfAndS3nDirs(path);
-            DirListingMetadata meta = metadataStore.listChildren(path);
+            DirListingMetadata meta =
+                S3Guard.listChildrenWithTtl(metadataStore, path,
+                    ttlTimeProvider);
             final RemoteIterator<FileStatus> cachedFileStatusIterator =
                 listing.createProvidedFileStatusIterator(
                     S3Guard.dirMetaToStatuses(meta), filter, acceptor);
@@ -3318,5 +3355,28 @@ public class S3AFileSystem extends FileSystem implements StreamCapabilities {
     default:
       return false;
     }
+  }
+
+  /**
+   * Get a shared copy of the AWS credentials, with its reference
+   * counter updated.
+   * Caller is required to call {@code close()} on this after
+   * they have finished using it.
+   * @param purpose what is this for? This is initially for logging
+   * @return a reference to shared credentials.
+   */
+  public AWSCredentialProviderList shareCredentials(final String purpose) {
+    LOG.debug("Sharing credentials for: {}", purpose);
+    return credentials.share();
+  }
+
+  @VisibleForTesting
+  protected S3Guard.ITtlTimeProvider getTtlTimeProvider() {
+    return ttlTimeProvider;
+  }
+
+  @VisibleForTesting
+  protected void setTtlTimeProvider(S3Guard.ITtlTimeProvider ttlTimeProvider) {
+    this.ttlTimeProvider = ttlTimeProvider;
   }
 }

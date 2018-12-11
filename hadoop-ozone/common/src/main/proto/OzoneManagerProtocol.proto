@@ -34,7 +34,6 @@ Ozone Manager. Ozone Manager manages the namespace for ozone.
 This is similar to Namenode for Ozone.
 */
 
-import "hdfs.proto";
 import "hdds.proto";
 
 enum Status {
@@ -59,6 +58,9 @@ enum Status {
     METADATA_ERROR = 19;
     OM_NOT_INITIALIZED = 20;
     SCM_VERSION_MISMATCH_ERROR = 21;
+    S3_BUCKET_NOT_FOUND = 22;
+    S3_BUCKET_ALREADY_EXISTS = 23;
+    INITIATE_MULTIPART_UPLOAD_ERROR = 24;
 }
 
 
@@ -168,8 +170,15 @@ message BucketInfo {
     required string bucketName = 2;
     repeated OzoneAclInfo acls = 3;
     required bool isVersionEnabled = 4 [default = false];
-    required hadoop.hdfs.StorageTypeProto storageType = 5 [default = DISK];
+    required StorageTypeProto storageType = 5 [default = DISK];
     required uint64 creationTime = 6;
+}
+
+enum StorageTypeProto {
+    DISK = 1;
+    SSD = 2;
+    ARCHIVE = 3;
+    RAM_DISK = 4;
 }
 
 message BucketArgs {
@@ -178,7 +187,7 @@ message BucketArgs {
     repeated OzoneAclInfo addAcls = 3;
     repeated OzoneAclInfo removeAcls = 4;
     optional bool isVersionEnabled = 5;
-    optional hadoop.hdfs.StorageTypeProto storageType = 6;
+    optional StorageTypeProto storageType = 6;
 }
 
 message OzoneAclInfo {
@@ -234,11 +243,11 @@ message KeyArgs {
     optional uint64 dataSize = 4;
     optional hadoop.hdds.ReplicationType type = 5;
     optional hadoop.hdds.ReplicationFactor factor = 6;
+    repeated KeyLocation keyLocations = 7;
 }
 
 message KeyLocation {
     required hadoop.hdds.BlockID blockID = 1;
-    required bool shouldCreateContainer = 2;
     required uint64 offset = 3;
     required uint64 length = 4;
     // indicated at which version this block gets created.
@@ -272,7 +281,7 @@ message LocateKeyResponse {
     optional KeyInfo keyInfo = 2;
     // clients' followup request may carry this ID for stateful operations (similar
     // to a cookie).
-    optional uint32 ID = 3;
+    optional uint64 ID = 3;
     // TODO : allow specifiying a particular version to read.
     optional uint64 openVersion = 4;
 }
@@ -318,17 +327,17 @@ message ListKeysResponse {
 
 message AllocateBlockRequest {
     required KeyArgs keyArgs = 1;
-    required uint32 clientID = 2;
+    required uint64 clientID = 2;
 }
 
 message AllocateBlockResponse {
     required Status status = 1;
-    required KeyLocation keyLocation = 2;
+    optional KeyLocation keyLocation = 2;
 }
 
 message CommitKeyRequest {
     required KeyArgs keyArgs = 1;
-    required uint32 clientID = 2;
+    required uint64 clientID = 2;
 }
 
 message CommitKeyResponse {
@@ -359,6 +368,69 @@ message ServiceInfo {
     required string hostname = 2;
     repeated ServicePort servicePorts = 3;
 }
+
+message S3BucketRequest {
+    required string userName = 1;
+    required string s3bucketname = 2;
+}
+
+message S3BucketResponse {
+    required Status status = 1;
+}
+
+message S3BucketInfoRequest {
+    required string s3bucketName = 1;
+}
+message S3BucketInfoResponse {
+    required Status status = 1;
+    optional string ozoneMapping = 2;
+}
+
+message S3DeleteBucketRequest {
+    required string s3bucketName = 1;
+}
+
+message S3DeleteBucketResponse {
+    required Status status = 1;
+}
+
+message S3ListBucketsRequest {
+    required string userName = 1;
+    optional string startKey = 2;
+    optional string prefix = 3;
+    optional int32 count = 4;
+}
+
+message S3ListBucketsResponse {
+    required Status status = 1;
+    repeated BucketInfo bucketInfo = 2;
+}
+
+
+message MultipartInfoInitiateRequest {
+    required KeyArgs keyArgs = 1;
+}
+
+message MultipartInfoInitiateResponse {
+    required string volumeName = 1;
+    required string bucketName = 2;
+    required string keyName = 3;
+    required string multipartUploadID = 4;
+    required Status status = 5;
+}
+
+message MultipartKeyInfo {
+    required string uploadID = 4;
+    repeated PartKeyInfo partKeyInfoList = 5;
+}
+
+message PartKeyInfo {
+    required string partName = 1;
+    required uint32 partNumber = 2;
+    required KeyInfo partKeyInfo = 3;
+}
+
+
 
 /**
  The OM service that takes care of Ozone namespace.
@@ -477,4 +549,25 @@ service OzoneManagerService {
     */
     rpc getServiceList(ServiceListRequest)
     returns(ServiceListResponse);
+
+    /**
+     Creates an S3 bucket and creates an ozone mapping for that bucket.
+    */
+    rpc createS3Bucket(S3BucketRequest)
+    returns(S3BucketResponse);
+
+    rpc deleteS3Bucket(S3DeleteBucketRequest)
+    returns(S3DeleteBucketResponse);
+
+    /**
+    Gets the Ozone Mapping information for the S3Bucket.
+    */
+    rpc getS3Bucketinfo(S3BucketInfoRequest)
+    returns(S3BucketInfoResponse);
+
+    rpc listS3Buckets(S3ListBucketsRequest)
+    returns(S3ListBucketsResponse);
+
+    rpc initiateMultiPartUpload(MultipartInfoInitiateRequest)
+    returns (MultipartInfoInitiateResponse);
 }

@@ -25,9 +25,9 @@ import org.apache.hadoop.ozone.container.common.impl.ContainerSet;
 import org.apache.hadoop.ozone.container.common.impl.TopNOrderedContainerDeletionChoosingPolicy;
 import org.apache.hadoop.ozone.container.common.interfaces.ContainerDeletionChoosingPolicy;
 import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData;
-import org.apache.hadoop.ozone.container.keyvalue.helpers.KeyUtils;
+import org.apache.hadoop.ozone.container.keyvalue.helpers.BlockUtils;
 import org.apache.hadoop.util.ReflectionUtils;
-import org.apache.ratis.shaded.com.google.protobuf
+import org.apache.ratis.thirdparty.com.google.protobuf
     .InvalidProtocolBufferException;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
@@ -72,7 +72,7 @@ public class BlockDeletingService extends BackgroundService{
   private static final Logger LOG =
       LoggerFactory.getLogger(BlockDeletingService.class);
 
-  ContainerSet containerSet;
+  private ContainerSet containerSet;
   private ContainerDeletionChoosingPolicy containerDeletionPolicy;
   private final Configuration conf;
 
@@ -88,11 +88,10 @@ public class BlockDeletingService extends BackgroundService{
   // Core pool size for container tasks
   private final static int BLOCK_DELETING_SERVICE_CORE_POOL_SIZE = 10;
 
-  public BlockDeletingService(ContainerSet containerSet,
-      long serviceInterval, long serviceTimeout, Configuration conf) {
-    super("BlockDeletingService", serviceInterval,
-        TimeUnit.MILLISECONDS, BLOCK_DELETING_SERVICE_CORE_POOL_SIZE,
-        serviceTimeout);
+  public BlockDeletingService(ContainerSet containerSet, long serviceInterval,
+      long serviceTimeout, TimeUnit timeUnit, Configuration conf) {
+    super("BlockDeletingService", serviceInterval, timeUnit,
+        BLOCK_DELETING_SERVICE_CORE_POOL_SIZE, serviceTimeout);
     this.containerSet = containerSet;
     containerDeletionPolicy = ReflectionUtils.newInstance(conf.getClass(
         ScmConfigKeys.OZONE_SCM_KEY_VALUE_CONTAINER_DELETION_CHOOSING_POLICY,
@@ -120,9 +119,11 @@ public class BlockDeletingService extends BackgroundService{
       // configured.
       containers = containerSet.chooseContainerForBlockDeletion(
           containerLimitPerInterval, containerDeletionPolicy);
-      LOG.info("Plan to choose {} containers for block deletion, "
-          + "actually returns {} valid containers.",
-          containerLimitPerInterval, containers.size());
+      if (containers.size() > 0) {
+        LOG.info("Plan to choose {} containers for block deletion, "
+                + "actually returns {} valid containers.",
+            containerLimitPerInterval, containers.size());
+      }
 
       for(ContainerData container : containers) {
         BlockDeletingTask containerTask =
@@ -184,7 +185,7 @@ public class BlockDeletingService extends BackgroundService{
       ContainerBackgroundTaskResult crr = new ContainerBackgroundTaskResult();
       long startTime = Time.monotonicNow();
       // Scan container's db and get list of under deletion blocks
-      MetadataStore meta = KeyUtils.getDB(
+      MetadataStore meta = BlockUtils.getDB(
           (KeyValueContainerData) containerData, conf);
       // # of blocks to delete is throttled
       KeyPrefixFilter filter =
@@ -210,8 +211,8 @@ public class BlockDeletingService extends BackgroundService{
         String blockName = DFSUtil.bytes2String(entry.getKey());
         LOG.debug("Deleting block {}", blockName);
         try {
-          ContainerProtos.KeyData data =
-              ContainerProtos.KeyData.parseFrom(entry.getValue());
+          ContainerProtos.BlockData data =
+              ContainerProtos.BlockData.parseFrom(entry.getValue());
           for (ContainerProtos.ChunkInfo chunkInfo : data.getChunksList()) {
             File chunkFile = dataDir.toPath()
                 .resolve(chunkInfo.getChunkName()).toFile();

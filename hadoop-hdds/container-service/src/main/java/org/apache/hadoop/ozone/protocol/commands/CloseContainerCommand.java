@@ -17,11 +17,11 @@
 package org.apache.hadoop.ozone.protocol.commands;
 
 import com.google.common.base.Preconditions;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerDatanodeProtocolProtos.SCMCommandProto;
 import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerDatanodeProtocolProtos.CloseContainerCommandProto;
+import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 
 /**
  * Asks datanode to close a container.
@@ -29,22 +29,19 @@ import org.apache.hadoop.hdds.protocol.proto
 public class CloseContainerCommand
     extends SCMCommand<CloseContainerCommandProto> {
 
-  private long containerID;
-  private HddsProtos.ReplicationType replicationType;
+  private final PipelineID pipelineID;
+  private boolean force;
 
-  public CloseContainerCommand(long containerID,
-      HddsProtos.ReplicationType replicationType) {
-    super();
-    this.containerID = containerID;
-    this.replicationType = replicationType;
+  public CloseContainerCommand(final long containerID,
+      final PipelineID pipelineID) {
+    this(containerID, pipelineID, false);
   }
 
-  // Should be called only for protobuf conversion
-  private CloseContainerCommand(long containerID,
-      HddsProtos.ReplicationType replicationType, long id) {
-    super(id);
-    this.containerID = containerID;
-    this.replicationType = replicationType;
+  public CloseContainerCommand(final long containerID,
+      final PipelineID pipelineID, boolean force) {
+    super(containerID);
+    this.pipelineID = pipelineID;
+    this.force = force;
   }
 
   /**
@@ -69,20 +66,22 @@ public class CloseContainerCommand
 
   public CloseContainerCommandProto getProto() {
     return CloseContainerCommandProto.newBuilder()
-        .setContainerID(containerID)
+        .setContainerID(getId())
         .setCmdId(getId())
-        .setReplicationType(replicationType).build();
+        .setPipelineID(pipelineID.getProtobuf())
+        .setForce(force)
+        .build();
   }
 
   public static CloseContainerCommand getFromProtobuf(
       CloseContainerCommandProto closeContainerProto) {
     Preconditions.checkNotNull(closeContainerProto);
-    return new CloseContainerCommand(closeContainerProto.getContainerID(),
-        closeContainerProto.getReplicationType(), closeContainerProto
-        .getCmdId());
+    return new CloseContainerCommand(closeContainerProto.getCmdId(),
+        PipelineID.getFromProtobuf(closeContainerProto.getPipelineID()),
+        closeContainerProto.getForce());
   }
 
   public long getContainerID() {
-    return containerID;
+    return getId();
   }
 }

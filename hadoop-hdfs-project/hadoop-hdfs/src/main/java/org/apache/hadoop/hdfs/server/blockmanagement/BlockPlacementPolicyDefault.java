@@ -71,12 +71,15 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
       CHOOSE_RANDOM_REASONS = ThreadLocal
       .withInitial(() -> new HashMap<NodeNotChosenReason, Integer>());
 
+  private static final BlockPlacementStatus ONE_RACK_PLACEMENT =
+      new BlockPlacementStatusDefault(1, 1, 1);
+
   private enum NodeNotChosenReason {
-    NOT_IN_SERVICE("the node isn't in service"),
+    NOT_IN_SERVICE("the node is not in service"),
     NODE_STALE("the node is stale"),
     NODE_TOO_BUSY("the node is too busy"),
     TOO_MANY_NODES_ON_RACK("the rack has too many chosen nodes"),
-    NOT_ENOUGH_STORAGE_SPACE("no enough storage space to place the block");
+    NOT_ENOUGH_STORAGE_SPACE("not enough storage space to place the block");
 
     private final String text;
 
@@ -280,7 +283,9 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
     if (avoidLocalNode) {
       results = new ArrayList<>(chosenStorage);
       Set<Node> excludedNodeCopy = new HashSet<>(excludedNodes);
-      excludedNodeCopy.add(writer);
+      if (writer != null) {
+        excludedNodeCopy.add(writer);
+      }
       localNode = chooseTarget(numOfReplicas, writer,
           excludedNodeCopy, blocksize, maxNodesPerRack, results,
           avoidStaleNodes, storagePolicy,
@@ -911,6 +916,24 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
   }
 
   /**
+   * Determine if a datanode should be chosen based on current workload.
+   *
+   * @param node The target datanode
+   * @return Return true if the datanode should be excluded, otherwise false
+   */
+  boolean excludeNodeByLoad(DatanodeDescriptor node){
+    final double maxLoad = considerLoadFactor *
+        stats.getInServiceXceiverAverage();
+    final int nodeLoad = node.getXceiverCount();
+    if ((nodeLoad > maxLoad) && (maxLoad > 0)) {
+      logNodeIsNotChosen(node, NodeNotChosenReason.NODE_TOO_BUSY,
+          "(load: " + nodeLoad + " > " + maxLoad + ")");
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Determine if a datanode is good for placing block.
    *
    * @param node The target datanode
@@ -921,7 +944,7 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
    * @param results A list containing currently chosen nodes. Used to check if
    *                too many nodes has been chosen in the target rack.
    * @param avoidStaleNodes Whether or not to avoid choosing stale nodes
-   * @return Reture true if the datanode is good candidate, otherwise false
+   * @return Return true if the datanode is good candidate, otherwise false
    */
   boolean isGoodDatanode(DatanodeDescriptor node,
                          int maxTargetPerRack, boolean considerLoad,
@@ -941,13 +964,8 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
     }
 
     // check the communication traffic of the target machine
-    if (considerLoad) {
-      final double maxLoad = considerLoadFactor *
-          stats.getInServiceXceiverAverage();
-      final int nodeLoad = node.getXceiverCount();
-      if (nodeLoad > maxLoad) {
-        logNodeIsNotChosen(node, NodeNotChosenReason.NODE_TOO_BUSY,
-            "(load: " + nodeLoad + " > " + maxLoad + ")");
+    if(considerLoad){
+      if(excludeNodeByLoad(node)){
         return false;
       }
     }
@@ -1014,22 +1032,23 @@ public class BlockPlacementPolicyDefault extends BlockPlacementPolicy {
   @Override
   public BlockPlacementStatus verifyBlockPlacement(DatanodeInfo[] locs,
       int numberOfReplicas) {
-    if (locs == null)
+    if (locs == null) {
       locs = DatanodeDescriptor.EMPTY_ARRAY;
+    }
     if (!clusterMap.hasClusterEverBeenMultiRack()) {
       // only one rack
-      return new BlockPlacementStatusDefault(1, 1, 1);
+      return ONE_RACK_PLACEMENT;
     }
-    int minRacks = 2;
-    minRacks = Math.min(minRacks, numberOfReplicas);
+    final int minRacks = Math.min(2, numberOfReplicas);
     // 1. Check that all locations are different.
     // 2. Count locations on different racks.
-    Set<String> racks = new TreeSet<>();
-    for (DatanodeInfo dn : locs)
-      racks.add(dn.getNetworkLocation());
-    return new BlockPlacementStatusDefault(racks.size(), minRacks,
-        clusterMap.getNumOfRacks());
+    final long rackCount = Arrays.asList(locs).stream()
+        .map(dn -> dn.getNetworkLocation()).distinct().count();
+
+    return new BlockPlacementStatusDefault(Math.toIntExact(rackCount),
+        minRacks, clusterMap.getNumOfRacks());
   }
+
   /**
    * Decide whether deleting the specified replica of the block still makes
    * the block conform to the configured block placement policy.

@@ -23,19 +23,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.StorageType;
+import org.apache.hadoop.hdds.protocol.StorageType;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.ozone.OzoneAcl;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.ozone.OzoneConsts;
-import org.apache.hadoop.ozone.client.BucketArgs;
-import org.apache.hadoop.ozone.client.VolumeArgs;
-import org.apache.hadoop.ozone.client.OzoneBucket;
-import org.apache.hadoop.ozone.client.OzoneKey;
+import org.apache.hadoop.ozone.client.*;
 import org.apache.hadoop.hdds.client.OzoneQuota;
-import org.apache.hadoop.ozone.client.OzoneVolume;
 import org.apache.hadoop.hdds.client.ReplicationFactor;
 import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.ozone.client.io.OzoneInputStream;
@@ -43,9 +39,10 @@ import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.client.protocol.ClientProtocol;
 import org.apache.hadoop.ozone.client.rest.headers.Header;
 import org.apache.hadoop.ozone.client.rest.response.BucketInfo;
-import org.apache.hadoop.ozone.client.rest.response.KeyInfo;
+import org.apache.hadoop.ozone.client.rest.response.KeyInfoDetails;
 import org.apache.hadoop.ozone.client.rest.response.VolumeInfo;
 import org.apache.hadoop.ozone.om.OMConfigKeys;
+import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
 import org.apache.hadoop.ozone.om.helpers.ServiceInfo;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.ServicePort;
 import org.apache.hadoop.ozone.web.response.ListBuckets;
@@ -80,6 +77,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.text.ParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -780,7 +778,8 @@ public class RestClient implements ClientProtocol {
           LOG.warn("Parse exception in getting creation time for volume", e);
         }
         return new OzoneKey(volumeName, bucketName, keyInfo.getKeyName(),
-            keyInfo.getSize(), creationTime, modificationTime);
+            keyInfo.getSize(), creationTime, modificationTime,
+            ReplicationType.valueOf(keyInfo.getType().toString()));
       }).collect(Collectors.toList());
     } catch (URISyntaxException e) {
       throw new IOException(e);
@@ -788,7 +787,7 @@ public class RestClient implements ClientProtocol {
   }
 
   @Override
-  public OzoneKey getKeyDetails(
+  public OzoneKeyDetails getKeyDetails(
       String volumeName, String bucketName, String keyName)
       throws IOException {
     try {
@@ -798,23 +797,70 @@ public class RestClient implements ClientProtocol {
       builder.setPath(PATH_SEPARATOR + volumeName +
           PATH_SEPARATOR + bucketName + PATH_SEPARATOR + keyName);
       builder.setParameter(Header.OZONE_INFO_QUERY_TAG,
-          Header.OZONE_INFO_QUERY_KEY);
+          Header.OZONE_INFO_QUERY_KEY_DETAIL);
       HttpGet httpGet = new HttpGet(builder.build());
       addOzoneHeaders(httpGet);
       HttpEntity response = executeHttpRequest(httpGet);
-      KeyInfo keyInfo =
-          KeyInfo.parse(EntityUtils.toString(response));
-      OzoneKey key = new OzoneKey(volumeName,
+      KeyInfoDetails keyInfo =
+          KeyInfoDetails.parse(EntityUtils.toString(response));
+
+      List<OzoneKeyLocation> ozoneKeyLocations = new ArrayList<>();
+      keyInfo.getKeyLocations().forEach((a) -> ozoneKeyLocations.add(
+          new OzoneKeyLocation(a.getContainerID(), a.getLocalID(),
+              a.getLength(), a.getOffset())));
+      OzoneKeyDetails key = new OzoneKeyDetails(volumeName,
           bucketName,
           keyInfo.getKeyName(),
           keyInfo.getSize(),
           HddsClientUtils.formatDateTime(keyInfo.getCreatedOn()),
-          HddsClientUtils.formatDateTime(keyInfo.getModifiedOn()));
+          HddsClientUtils.formatDateTime(keyInfo.getModifiedOn()),
+          ozoneKeyLocations, ReplicationType.valueOf(
+              keyInfo.getType().toString()));
       EntityUtils.consume(response);
       return key;
     } catch (URISyntaxException | ParseException e) {
       throw new IOException(e);
     }
+  }
+
+  @Override
+  public void createS3Bucket(String userName, String s3BucketName)
+      throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
+  }
+
+  @Override
+  public void deleteS3Bucket(String s3BucketName)
+      throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
+  }
+
+  @Override
+  public String getOzoneBucketMapping(String s3BucketName) throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
+  }
+
+  @Override
+  public String getOzoneVolumeName(String s3BucketName) throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
+  }
+
+  @Override
+  public String getOzoneBucketName(String s3BucketName) throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
+  }
+
+  @Override
+  public List<OzoneBucket> listS3Buckets(String userName, String bucketPrefix,
+                                  String prevBucket, int maxListResult)
+      throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
   }
 
   /**
@@ -905,5 +951,16 @@ public class RestClient implements ClientProtocol {
     if (!Strings.isNullOrEmpty(value)) {
       builder.addParameter(param, value);
     }
+  }
+
+  @Override
+  public OmMultipartInfo initiateMultipartUpload(String volumeName,
+                                                 String bucketName,
+                                                 String keyName,
+                                                 ReplicationType type,
+                                                 ReplicationFactor factor)
+      throws IOException {
+    throw new UnsupportedOperationException("Ozone REST protocol does not " +
+        "support this operation.");
   }
 }

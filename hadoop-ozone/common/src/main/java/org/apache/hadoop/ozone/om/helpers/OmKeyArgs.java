@@ -16,29 +16,40 @@
  * limitations under the License.
  */
 package org.apache.hadoop.ozone.om.helpers;
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
+import org.apache.hadoop.ozone.OzoneConsts;
+import org.apache.hadoop.ozone.audit.Auditable;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Args for key. Client use this to specify key's attributes on  key creation
  * (putKey()).
  */
-public final class OmKeyArgs {
+public final class OmKeyArgs implements Auditable {
   private final String volumeName;
   private final String bucketName;
   private final String keyName;
   private long dataSize;
   private final ReplicationType type;
   private final ReplicationFactor factor;
+  private List<OmKeyLocationInfo> locationInfoList;
 
   private OmKeyArgs(String volumeName, String bucketName, String keyName,
-                    long dataSize, ReplicationType type, ReplicationFactor factor) {
+      long dataSize, ReplicationType type, ReplicationFactor factor,
+      List<OmKeyLocationInfo> locationInfoList) {
     this.volumeName = volumeName;
     this.bucketName = bucketName;
     this.keyName = keyName;
     this.dataSize = dataSize;
     this.type = type;
     this.factor = factor;
+    this.locationInfoList = locationInfoList;
   }
 
   public ReplicationType getType() {
@@ -69,6 +80,38 @@ public final class OmKeyArgs {
     dataSize = size;
   }
 
+  public void setLocationInfoList(List<OmKeyLocationInfo> locationInfoList) {
+    this.locationInfoList = locationInfoList;
+  }
+
+  public List<OmKeyLocationInfo> getLocationInfoList() {
+    return locationInfoList;
+  }
+
+  @Override
+  public Map<String, String> toAuditMap() {
+    Map<String, String> auditMap = new LinkedHashMap<>();
+    auditMap.put(OzoneConsts.VOLUME, this.volumeName);
+    auditMap.put(OzoneConsts.BUCKET, this.bucketName);
+    auditMap.put(OzoneConsts.KEY, this.keyName);
+    auditMap.put(OzoneConsts.DATA_SIZE, String.valueOf(this.dataSize));
+    auditMap.put(OzoneConsts.REPLICATION_TYPE,
+        (this.type != null) ? this.type.name() : null);
+    auditMap.put(OzoneConsts.REPLICATION_FACTOR,
+        (this.factor != null) ? this.factor.name() : null);
+    auditMap.put(OzoneConsts.KEY_LOCATION_INFO,
+        (this.locationInfoList != null) ? locationInfoList.toString() : null);
+    return auditMap;
+  }
+
+  @VisibleForTesting
+  public void addLocationInfo(OmKeyLocationInfo locationInfo) {
+    if (this.locationInfoList == null) {
+      locationInfoList = new ArrayList<>();
+    }
+    locationInfoList.add(locationInfo);
+  }
+
   /**
    * Builder class of OmKeyArgs.
    */
@@ -79,7 +122,7 @@ public final class OmKeyArgs {
     private long dataSize;
     private ReplicationType type;
     private ReplicationFactor factor;
-
+    private List<OmKeyLocationInfo> locationInfoList;
 
     public Builder setVolumeName(String volume) {
       this.volumeName = volume;
@@ -111,9 +154,14 @@ public final class OmKeyArgs {
       return this;
     }
 
+    public Builder setLocationInfoList(List<OmKeyLocationInfo> locationInfos) {
+      this.locationInfoList = locationInfos;
+      return this;
+    }
+
     public OmKeyArgs build() {
-      return new OmKeyArgs(volumeName, bucketName, keyName, dataSize,
-          type, factor);
+      return new OmKeyArgs(volumeName, bucketName, keyName, dataSize, type,
+          factor, locationInfoList);
     }
   }
 }

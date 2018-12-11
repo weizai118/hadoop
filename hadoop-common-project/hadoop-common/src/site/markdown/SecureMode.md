@@ -37,7 +37,7 @@ When service level authentication is turned on, end users must authenticate them
 
 Ensure that HDFS and YARN daemons run as different Unix users, e.g. `hdfs` and `yarn`. Also, ensure that the MapReduce JobHistory server runs as different user such as `mapred`.
 
-It's recommended to have them share a Unix group, for e.g. `hadoop`. See also "[Mapping from user to group](#Mapping_from_user_to_group)" for group management.
+It's recommended to have them share a Unix group, e.g. `hadoop`. See also "[Mapping from user to group](#Mapping_from_user_to_group)" for group management.
 
 | User:Group    | Daemons                                             |
 |:--------------|:----------------------------------------------------|
@@ -470,7 +470,6 @@ KDiag: Diagnose Kerberos Problems
   [--out <file>] : Write output to a file.
   [--resource <resource>] : Load an XML configuration resource.
   [--secure] : Require the hadoop configuration to be secure.
-  [--verifyshortname <principal>]: Verify the short name of the specific principal does not contain '@' or '/'
 ```
 
 #### `--jaas`: Require a JAAS file to be defined in `java.security.auth.login.config`.
@@ -565,11 +564,6 @@ or implicitly set to "simple":
 ```
 
 Needless to say, an application so configured cannot talk to a secure Hadoop cluster.
-
-#### `--verifyshortname <principal>`: validate the short name of a principal
-
-This verifies that the short name of a principal contains neither the `"@"`
-nor `"/"` characters.
 
 ### Example
 

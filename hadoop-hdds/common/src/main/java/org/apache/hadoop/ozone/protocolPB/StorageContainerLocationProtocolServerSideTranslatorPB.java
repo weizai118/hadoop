@@ -21,11 +21,20 @@ package org.apache.hadoop.ozone.protocolPB;
 import com.google.protobuf.RpcController;
 import com.google.protobuf.ServiceException;
 import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.InChillModeRequestProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.InChillModeResponseProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ForceExitChillModeRequestProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ForceExitChillModeResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.GetContainerWithPipelineRequestProto;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.GetContainerWithPipelineResponseProto;
 import org.apache.hadoop.hdds.scm.ScmInfo;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerInfo;
+import org.apache.hadoop.hdds.scm.container.ContainerInfo;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolPB;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
@@ -35,6 +44,14 @@ import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerLocationProtocolProtos.ContainerRequestProto;
 import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerLocationProtocolProtos.ContainerResponseProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ClosePipelineRequestProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ClosePipelineResponseProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ListPipelineRequestProto;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerLocationProtocolProtos.ListPipelineResponseProto;
 import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerLocationProtocolProtos.GetContainerRequestProto;
 import org.apache.hadoop.hdds.protocol.proto
@@ -204,6 +221,34 @@ public final class StorageContainerLocationProtocolServerSideTranslatorPB
   }
 
   @Override
+  public ListPipelineResponseProto listPipelines(
+      RpcController controller, ListPipelineRequestProto request)
+      throws ServiceException {
+    try {
+      ListPipelineResponseProto.Builder builder = ListPipelineResponseProto
+          .newBuilder();
+      List<Pipeline> pipelineIDs = impl.listPipelines();
+      pipelineIDs.stream().map(Pipeline::getProtobufMessage)
+           .forEach(builder::addPipelines);
+      return builder.build();
+    } catch (IOException e) {
+      throw new ServiceException(e);
+    }
+  }
+
+  @Override
+  public ClosePipelineResponseProto closePipeline(
+      RpcController controller, ClosePipelineRequestProto request)
+      throws ServiceException {
+    try {
+      impl.closePipeline(request.getPipelineID());
+      return ClosePipelineResponseProto.newBuilder().build();
+    } catch (IOException e) {
+      throw new ServiceException(e);
+    }
+  }
+
+  @Override
   public HddsProtos.GetScmInfoRespsonseProto getScmInfo(
       RpcController controller, HddsProtos.GetScmInfoRequestProto req)
       throws ServiceException {
@@ -217,5 +262,29 @@ public final class StorageContainerLocationProtocolServerSideTranslatorPB
       throw new ServiceException(ex);
     }
 
+  }
+
+  @Override
+  public InChillModeResponseProto inChillMode(
+      RpcController controller,
+      InChillModeRequestProto request) throws ServiceException {
+    try {
+      return InChillModeResponseProto.newBuilder()
+          .setInChillMode(impl.inChillMode()).build();
+    } catch (IOException ex) {
+      throw new ServiceException(ex);
+    }
+  }
+
+  @Override
+  public ForceExitChillModeResponseProto forceExitChillMode(
+      RpcController controller, ForceExitChillModeRequestProto request)
+      throws ServiceException {
+    try {
+      return ForceExitChillModeResponseProto.newBuilder()
+          .setExitedChillMode(impl.forceExitChillMode()).build();
+    } catch (IOException ex) {
+      throw new ServiceException(ex);
+    }
   }
 }

@@ -17,36 +17,33 @@
 
 package org.apache.hadoop.hdds.scm.container;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerInfo;
-import org.apache.hadoop.hdds.scm.container.common.helpers.Pipeline;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.container.states.ContainerState;
 import org.apache.hadoop.hdds.scm.container.states.ContainerStateMap;
 import org.apache.hadoop.hdds.scm.exceptions.SCMException;
-import org.apache.hadoop.hdds.scm.pipelines.PipelineSelector;
+import org.apache.hadoop.hdds.scm.pipeline.PipelineManager;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.LifeCycleEvent;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.LifeCycleState;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
-import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.common.statemachine
     .InvalidStateTransitionException;
 import org.apache.hadoop.ozone.common.statemachine.StateMachine;
 import org.apache.hadoop.util.Time;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -112,7 +109,7 @@ import static org.apache.hadoop.hdds.scm.exceptions.SCMException.ResultCodes
  * TimeOut Delete Container State Machine - if the container creating times out,
  * then Container State manager decides to delete the container.
  */
-public class ContainerStateManager implements Closeable {
+public class ContainerStateManager {
   private static final Logger LOG =
       LoggerFactory.getLogger(ContainerStateManager.class);
 
@@ -131,218 +128,186 @@ public class ContainerStateManager implements Closeable {
    * TODO : Add Container Tags so we know which containers are owned by SCM.
    */
   @SuppressWarnings("unchecked")
-  public ContainerStateManager(Configuration configuration,
-      Mapping containerMapping) {
+  public ContainerStateManager(final Configuration configuration) {
 
     // Initialize the container state machine.
-    Set<HddsProtos.LifeCycleState> finalStates = new HashSet();
+    final Set<HddsProtos.LifeCycleState> finalStates = new HashSet();
 
     // These are the steady states of a container.
     finalStates.add(LifeCycleState.OPEN);
     finalStates.add(LifeCycleState.CLOSED);
     finalStates.add(LifeCycleState.DELETED);
 
-    this.stateMachine = new StateMachine<>(LifeCycleState.ALLOCATED,
+    this.stateMachine = new StateMachine<>(LifeCycleState.OPEN,
         finalStates);
     initializeStateMachine();
 
-    this.containerSize = OzoneConsts.GB * configuration.getInt(
-        ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE_GB,
-        ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE_DEFAULT);
+    this.containerSize = (long) configuration.getStorageSize(
+        ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE,
+        ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE_DEFAULT,
+        StorageUnit.BYTES);
 
-    lastUsedMap = new ConcurrentHashMap<>();
-    containerCount = new AtomicLong(0);
-    containers = new ContainerStateMap();
-    loadExistingContainers(containerMapping);
-  }
-
-  private void loadExistingContainers(Mapping containerMapping) {
-
-    List<ContainerInfo> containerList;
-    try {
-      containerList = containerMapping.listContainer(0, Integer.MAX_VALUE);
-
-      // if there are no container to load, let us return.
-      if (containerList == null || containerList.size() == 0) {
-        LOG.info("No containers to load for this cluster.");
-        return;
-      }
-    } catch (IOException e) {
-      if (!e.getMessage().equals("No container exists in current db")) {
-        LOG.error("Could not list the containers", e);
-      }
-      return;
-    }
-
-    try {
-      long maxID = 0;
-      for (ContainerInfo container : containerList) {
-        containers.addContainer(container);
-
-        if (maxID < container.getContainerID()) {
-          maxID = container.getContainerID();
-        }
-
-        containerCount.set(maxID);
-      }
-    } catch (SCMException ex) {
-      LOG.error("Unable to create a container information. ", ex);
-      // Fix me, what is the proper shutdown procedure for SCM ??
-      // System.exit(1) // Should we exit here?
-    }
-  }
-
-  /**
-   * Return the info of all the containers kept by the in-memory mapping.
-   *
-   * @return the list of all container info.
-   */
-  public List<ContainerInfo> getAllContainers() {
-    List<ContainerInfo> list = new ArrayList<>();
-
-    //No Locking needed since the return value is an immutable map.
-    containers.getContainerMap().forEach((key, value) -> list.add(value));
-    return list;
+    this.lastUsedMap = new ConcurrentHashMap<>();
+    this.containerCount = new AtomicLong(0);
+    this.containers = new ContainerStateMap();
   }
 
   /*
    *
    * Event and State Transition Mapping:
    *
-   * State: ALLOCATED ---------------> CREATING
-   * Event:                CREATE
+   * State: OPEN         ----------------> CLOSING
+   * Event:                    FINALIZE
    *
-   * State: CREATING  ---------------> OPEN
-   * Event:               CREATED
+   * State: CLOSING      ----------------> QUASI_CLOSED
+   * Event:                  QUASI_CLOSE
    *
-   * State: OPEN      ---------------> CLOSING
-   * Event:               FINALIZE
+   * State: CLOSING      ----------------> CLOSED
+   * Event:                     CLOSE
    *
-   * State: CLOSING   ---------------> CLOSED
-   * Event:                CLOSE
+   * State: QUASI_CLOSED ----------------> CLOSED
+   * Event:                  FORCE_CLOSE
    *
-   * State: CLOSED   ----------------> DELETING
-   * Event:                DELETE
+   * State: CLOSED       ----------------> DELETING
+   * Event:                    DELETE
    *
-   * State: DELETING ----------------> DELETED
-   * Event:               CLEANUP
-   *
-   * State: CREATING  ---------------> DELETING
-   * Event:               TIMEOUT
+   * State: DELETING     ----------------> DELETED
+   * Event:                    CLEANUP
    *
    *
    * Container State Flow:
    *
-   * [ALLOCATED]---->[CREATING]------>[OPEN]-------->[CLOSING]------->[CLOSED]
-   *            (CREATE)     |    (CREATED)       (FINALIZE)     (CLOSE)    |
-   *                         |                                              |
-   *                         |                                              |
-   *                         |(TIMEOUT)                             (DELETE)|
-   *                         |                                              |
-   *                         +-------------> [DELETING] <-------------------+
-   *                                            |
-   *                                            |
-   *                                   (CLEANUP)|
-   *                                            |
-   *                                        [DELETED]
+   * [OPEN]--------------->[CLOSING]--------------->[QUASI_CLOSED]
+   *          (FINALIZE)      |      (QUASI_CLOSE)        |
+   *                          |                           |
+   *                          |                           |
+   *                  (CLOSE) |             (FORCE_CLOSE) |
+   *                          |                           |
+   *                          |                           |
+   *                          +--------->[CLOSED]<--------+
+   *                                        |
+   *                                (DELETE)|
+   *                                        |
+   *                                        |
+   *                                   [DELETING]
+   *                                        |
+   *                              (CLEANUP) |
+   *                                        |
+   *                                        V
+   *                                    [DELETED]
+   *
    */
   private void initializeStateMachine() {
-    stateMachine.addTransition(LifeCycleState.ALLOCATED,
-        LifeCycleState.CREATING,
-        LifeCycleEvent.CREATE);
-
-    stateMachine.addTransition(LifeCycleState.CREATING,
-        LifeCycleState.OPEN,
-        LifeCycleEvent.CREATED);
-
     stateMachine.addTransition(LifeCycleState.OPEN,
         LifeCycleState.CLOSING,
         LifeCycleEvent.FINALIZE);
 
     stateMachine.addTransition(LifeCycleState.CLOSING,
+        LifeCycleState.QUASI_CLOSED,
+        LifeCycleEvent.QUASI_CLOSE);
+
+    stateMachine.addTransition(LifeCycleState.CLOSING,
         LifeCycleState.CLOSED,
         LifeCycleEvent.CLOSE);
+
+    stateMachine.addTransition(LifeCycleState.QUASI_CLOSED,
+        LifeCycleState.CLOSED,
+        LifeCycleEvent.FORCE_CLOSE);
 
     stateMachine.addTransition(LifeCycleState.CLOSED,
         LifeCycleState.DELETING,
         LifeCycleEvent.DELETE);
-
-    stateMachine.addTransition(LifeCycleState.CREATING,
-        LifeCycleState.DELETING,
-        LifeCycleEvent.TIMEOUT);
 
     stateMachine.addTransition(LifeCycleState.DELETING,
         LifeCycleState.DELETED,
         LifeCycleEvent.CLEANUP);
   }
 
+  void loadContainer(final ContainerInfo containerInfo)
+      throws SCMException {
+    containers.addContainer(containerInfo);
+    containerCount.set(Long.max(
+        containerInfo.getContainerID(), containerCount.get()));
+  }
+
   /**
-   * allocates a new container based on the type, replication etc.
+   * Allocates a new container based on the type, replication etc.
    *
-   * @param selector -- Pipeline selector class.
+   * @param pipelineManager -- Pipeline Manager class.
    * @param type -- Replication type.
    * @param replicationFactor - Replication replicationFactor.
    * @return ContainerWithPipeline
    * @throws IOException  on Failure.
    */
-  public ContainerWithPipeline allocateContainer(PipelineSelector selector, HddsProtos
-      .ReplicationType type, HddsProtos.ReplicationFactor replicationFactor,
-      String owner) throws IOException {
+  ContainerInfo allocateContainer(final PipelineManager pipelineManager,
+      final HddsProtos.ReplicationType type,
+      final HddsProtos.ReplicationFactor replicationFactor, final String owner)
+      throws IOException {
 
-    Pipeline pipeline = selector.getReplicationPipeline(type,
-        replicationFactor);
+    Pipeline pipeline;
+    try {
+      pipeline = pipelineManager.createPipeline(type, replicationFactor);
+    } catch (IOException e) {
+      final List<Pipeline> pipelines = pipelineManager
+          .getPipelines(type, replicationFactor, Pipeline.PipelineState.OPEN);
+      if (pipelines.isEmpty()) {
+        throw new IOException("Could not allocate container. Cannot get any" +
+            " matching pipeline for Type:" + type +
+            ", Factor:" + replicationFactor + ", State:PipelineState.OPEN");
+      }
+      pipeline = pipelines.get((int) containerCount.get() % pipelines.size());
+    }
 
     Preconditions.checkNotNull(pipeline, "Pipeline type=%s/"
         + "replication=%s couldn't be found for the new container. "
         + "Do you have enough nodes?", type, replicationFactor);
 
-    ContainerInfo containerInfo = new ContainerInfo.Builder()
-        .setState(HddsProtos.LifeCycleState.ALLOCATED)
-        .setPipelineName(pipeline.getPipelineName())
-        // This is bytes allocated for blocks inside container, not the
-        // container size
-        .setAllocatedBytes(0)
+    final long containerID = containerCount.incrementAndGet();
+    final ContainerInfo containerInfo = new ContainerInfo.Builder()
+        .setState(LifeCycleState.OPEN)
+        .setPipelineID(pipeline.getId())
         .setUsedBytes(0)
         .setNumberOfKeys(0)
         .setStateEnterTime(Time.monotonicNow())
         .setOwner(owner)
-        .setContainerID(containerCount.incrementAndGet())
+        .setContainerID(containerID)
         .setDeleteTransactionId(0)
         .setReplicationFactor(replicationFactor)
         .setReplicationType(pipeline.getType())
         .build();
+    pipelineManager.addContainerToPipeline(pipeline.getId(),
+        ContainerID.valueof(containerID));
     Preconditions.checkNotNull(containerInfo);
     containers.addContainer(containerInfo);
     LOG.trace("New container allocated: {}", containerInfo);
-    return new ContainerWithPipeline(containerInfo, pipeline);
+    return containerInfo;
   }
 
   /**
    * Update the Container State to the next state.
    *
-   * @param info - ContainerInfo
+   * @param containerID - ContainerID
    * @param event - LifeCycle Event
    * @return Updated ContainerInfo.
    * @throws SCMException  on Failure.
    */
-  public ContainerInfo updateContainerState(ContainerInfo
-      info, HddsProtos.LifeCycleEvent event) throws SCMException {
-    LifeCycleState newState;
+  ContainerInfo updateContainerState(final ContainerID containerID,
+      final HddsProtos.LifeCycleEvent event)
+      throws SCMException, ContainerNotFoundException {
+    final ContainerInfo info = containers.getContainerInfo(containerID);
     try {
-      newState = this.stateMachine.getNextState(info.getState(), event);
+      final LifeCycleState newState = stateMachine.getNextState(
+          info.getState(), event);
+      containers.updateState(containerID, info.getState(), newState);
+      return containers.getContainerInfo(containerID);
     } catch (InvalidStateTransitionException ex) {
       String error = String.format("Failed to update container state %s, " +
               "reason: invalid state transition from state: %s upon " +
               "event: %s.",
-          info.getContainerID(), info.getState(), event);
+          containerID, info.getState(), event);
       LOG.error(error);
       throw new SCMException(error, FAILED_TO_CHANGE_CONTAINER_STATE);
     }
-
-    // This is a post condition after executing getNextState.
-    Preconditions.checkNotNull(newState);
-    containers.updateState(info, info.getState(), newState);
-    return containers.getContainerInfo(info);
   }
 
   /**
@@ -351,22 +316,28 @@ public class ContainerStateManager implements Closeable {
    * @return  ContainerInfo
    * @throws SCMException - on Error.
    */
-  public ContainerInfo updateContainerInfo(ContainerInfo info)
-      throws SCMException {
+  ContainerInfo updateContainerInfo(final ContainerInfo info)
+      throws ContainerNotFoundException {
     containers.updateContainerInfo(info);
-    return containers.getContainerInfo(info);
+    return containers.getContainerInfo(info.containerID());
   }
 
   /**
    * Update deleteTransactionId for a container.
    *
-   * @param containerID ContainerID of the container whose delete
-   *                    transactionId needs to be updated.
-   * @param transactionId latest transactionId to be updated for the container
+   * @param deleteTransactionMap maps containerId to its new
+   *                             deleteTransactionID
    */
-  public void updateDeleteTransactionId(Long containerID, long transactionId) {
-    containers.getContainerMap().get(ContainerID.valueof(containerID))
-        .updateDeleteTransactionId(transactionId);
+  void updateDeleteTransactionId(
+      final Map<Long, Long> deleteTransactionMap) {
+    deleteTransactionMap.forEach((k, v) -> {
+      try {
+        containers.getContainerInfo(ContainerID.valueof(k))
+            .updateDeleteTransactionId(v);
+      } catch (ContainerNotFoundException e) {
+        LOG.warn("Exception while updating delete transaction id.", e);
+      }
+    });
   }
 
   /**
@@ -379,12 +350,12 @@ public class ContainerStateManager implements Closeable {
    * @param state - State of the Container-- {Open, Allocated etc.}
    * @return ContainerInfo, null if there is no match found.
    */
-  public ContainerInfo getMatchingContainer(final long size,
+  ContainerInfo getMatchingContainer(final long size,
       String owner, ReplicationType type, ReplicationFactor factor,
       LifeCycleState state) {
 
     // Find containers that match the query spec, if no match return null.
-    NavigableSet<ContainerID> matchingSet =
+    final NavigableSet<ContainerID> matchingSet =
         containers.getMatchingContainerIDs(state, owner, factor, type);
     if (matchingSet == null || matchingSet.size() == 0) {
       return null;
@@ -392,11 +363,9 @@ public class ContainerStateManager implements Closeable {
 
     // Get the last used container and find container above the last used
     // container ID.
-    ContainerState key = new ContainerState(owner, type, factor);
-    ContainerID lastID = lastUsedMap.get(key);
-    if(lastID == null) {
-      lastID = matchingSet.first();
-    }
+    final ContainerState key = new ContainerState(owner, type, factor);
+    final ContainerID lastID = lastUsedMap
+        .getOrDefault(key, matchingSet.first());
 
     // There is a small issue here. The first time, we will skip the first
     // container. But in most cases it will not matter.
@@ -420,30 +389,45 @@ public class ContainerStateManager implements Closeable {
       resultSet = matchingSet.headSet(lastID, true);
       selectedContainer = findContainerWithSpace(size, resultSet, owner);
     }
-    // Update the allocated Bytes on this container.
-    if(selectedContainer != null) {
-      selectedContainer.updateAllocatedBytes(size);
-    }
     return selectedContainer;
 
   }
 
-  private ContainerInfo findContainerWithSpace(long size,
-      NavigableSet<ContainerID> searchSet, String owner) {
-    // Get the container with space to meet our request.
-    for (ContainerID id : searchSet) {
-      ContainerInfo containerInfo = containers.getContainerInfo(id.getId());
-      if (containerInfo.getAllocatedBytes() + size <= this.containerSize) {
-        containerInfo.updateLastUsedTime();
+  private ContainerInfo findContainerWithSpace(final long size,
+      final NavigableSet<ContainerID> searchSet, final String owner) {
+    try {
+      // Get the container with space to meet our request.
+      for (ContainerID id : searchSet) {
+        final ContainerInfo containerInfo = containers.getContainerInfo(id);
+        if (containerInfo.getUsedBytes() + size <= this.containerSize) {
+          containerInfo.updateLastUsedTime();
 
-        ContainerState key = new ContainerState(owner,
-            containerInfo.getReplicationType(),
-            containerInfo.getReplicationFactor());
-        lastUsedMap.put(key, containerInfo.containerID());
-        return containerInfo;
+          final ContainerState key = new ContainerState(owner,
+              containerInfo.getReplicationType(),
+              containerInfo.getReplicationFactor());
+          lastUsedMap.put(key, containerInfo.containerID());
+          return containerInfo;
+        }
       }
+    } catch (ContainerNotFoundException e) {
+      // This should not happen!
+      LOG.warn("Exception while finding container with space", e);
     }
     return null;
+  }
+
+  Set<ContainerID> getAllContainerIDs() {
+    return containers.getAllContainerIDs();
+  }
+
+  /**
+   * Returns Containers by State.
+   *
+   * @param state - State - Open, Closed etc.
+   * @return List of containers by state.
+   */
+  Set<ContainerID> getContainerIDsByState(final LifeCycleState state) {
+    return containers.getContainerIDsByState(state);
   }
 
   /**
@@ -455,25 +439,11 @@ public class ContainerStateManager implements Closeable {
    * @param state - Current State, like Open, Close etc.
    * @return Set of containers that match the specific query parameters.
    */
-  public NavigableSet<ContainerID> getMatchingContainerIDs(
-      String owner, ReplicationType type, ReplicationFactor factor,
-      LifeCycleState state) {
+  NavigableSet<ContainerID> getMatchingContainerIDs(final String owner,
+      final ReplicationType type, final ReplicationFactor factor,
+      final LifeCycleState state) {
     return containers.getMatchingContainerIDs(state, owner,
         factor, type);
-  }
-
-  /**
-   * Returns the containerInfo with pipeline for the given container id.
-   * @param selector -- Pipeline selector class.
-   * @param containerID id of the container
-   * @return ContainerInfo containerInfo
-   * @throws IOException
-   */
-  public ContainerWithPipeline getContainer(PipelineSelector selector,
-      ContainerID containerID) throws IOException {
-    ContainerInfo info = containers.getContainerInfo(containerID.getId());
-    Pipeline pipeline = selector.getPipeline(info.getPipelineName(), info.getReplicationType());
-    return new ContainerWithPipeline(info, pipeline);
   }
 
   /**
@@ -482,12 +452,12 @@ public class ContainerStateManager implements Closeable {
    * @return ContainerInfo containerInfo
    * @throws IOException
    */
-  public ContainerInfo getContainer(ContainerID containerID) {
-    return containers.getContainerInfo(containerID.getId());
+  ContainerInfo getContainer(final ContainerID containerID)
+      throws ContainerNotFoundException {
+    return containers.getContainerInfo(containerID);
   }
 
-  @Override
-  public void close() throws IOException {
+  void close() throws IOException {
   }
 
   /**
@@ -497,8 +467,8 @@ public class ContainerStateManager implements Closeable {
    * @param containerID
    * @return Set<DatanodeDetails>
    */
-  public Set<DatanodeDetails> getContainerReplicas(ContainerID containerID)
-      throws SCMException {
+  Set<ContainerReplica> getContainerReplicas(
+      final ContainerID containerID) throws ContainerNotFoundException {
     return containers.getContainerReplicas(containerID);
   }
 
@@ -506,26 +476,29 @@ public class ContainerStateManager implements Closeable {
    * Add a container Replica for given DataNode.
    *
    * @param containerID
-   * @param dn
+   * @param replica
    */
-  public void addContainerReplica(ContainerID containerID, DatanodeDetails dn) {
-    containers.addContainerReplica(containerID, dn);
+  void updateContainerReplica(final ContainerID containerID,
+      final ContainerReplica replica) throws ContainerNotFoundException {
+    containers.updateContainerReplica(containerID, replica);
   }
 
   /**
    * Remove a container Replica for given DataNode.
    *
    * @param containerID
-   * @param dn
+   * @param replica
    * @return True of dataNode is removed successfully else false.
    */
-  public boolean removeContainerReplica(ContainerID containerID,
-      DatanodeDetails dn) throws SCMException {
-    return containers.removeContainerReplica(containerID, dn);
+  void removeContainerReplica(final ContainerID containerID,
+      final ContainerReplica replica)
+      throws ContainerNotFoundException, ContainerReplicaNotFoundException {
+    containers.removeContainerReplica(containerID, replica);
   }
-  
-  @VisibleForTesting
-  public ContainerStateMap getContainerStateMap() {
-    return containers;
+
+  void removeContainer(final ContainerID containerID)
+      throws ContainerNotFoundException {
+    containers.removeContainer(containerID);
   }
+
 }

@@ -17,8 +17,9 @@
 package org.apache.hadoop.hdds.scm.block;
 
 import com.google.common.collect.ArrayListMultimap;
-import org.apache.hadoop.hdds.scm.container.Mapping;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.scm.container.ContainerID;
+import org.apache.hadoop.hdds.scm.container.ContainerInfo;
+import org.apache.hadoop.hdds.scm.container.ContainerManager;
 import org.apache.hadoop.hdds.protocol.proto
     .StorageContainerDatanodeProtocolProtos.DeletedBlocksTransaction;
 
@@ -28,7 +29,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.apache.hadoop.hdds.scm.container.common.helpers.Pipeline;
+
+import org.apache.hadoop.hdds.scm.container.ContainerReplica;
 
 /**
  * A wrapper class to hold info about datanode and all deleted block
@@ -40,60 +42,71 @@ public class DatanodeDeletedBlockTransactions {
   private int maximumAllowedTXNum;
   // Current counter of inserted TX.
   private int currentTXNum;
-  private Mapping mappingService;
+  private ContainerManager containerManager;
   // A list of TXs mapped to a certain datanode ID.
   private final ArrayListMultimap<UUID, DeletedBlocksTransaction>
       transactions;
 
-  DatanodeDeletedBlockTransactions(Mapping mappingService,
+  DatanodeDeletedBlockTransactions(ContainerManager containerManager,
       int maximumAllowedTXNum, int nodeNum) {
     this.transactions = ArrayListMultimap.create();
-    this.mappingService = mappingService;
+    this.containerManager = containerManager;
     this.maximumAllowedTXNum = maximumAllowedTXNum;
     this.nodeNum = nodeNum;
   }
 
-  public void addTransaction(DeletedBlocksTransaction tx) throws IOException {
-    Pipeline pipeline = null;
+  public boolean addTransaction(DeletedBlocksTransaction tx,
+      Set<UUID> dnsWithTransactionCommitted) {
     try {
-      pipeline = mappingService.getContainerWithPipeline(tx.getContainerID())
-          .getPipeline();
-    } catch (IOException e) {
-      SCMBlockDeletingService.LOG.warn("Got container info error.", e);
-    }
-
-    if (pipeline == null) {
-      SCMBlockDeletingService.LOG.warn(
-          "Container {} not found, continue to process next",
-          tx.getContainerID());
-      return;
-    }
-
-    for (DatanodeDetails dd : pipeline.getMachines()) {
-      UUID dnID = dd.getUuid();
-      if (transactions.containsKey(dnID)) {
-        List<DeletedBlocksTransaction> txs = transactions.get(dnID);
-        if (txs != null && txs.size() < maximumAllowedTXNum) {
-          boolean hasContained = false;
-          for (DeletedBlocksTransaction t : txs) {
-            if (t.getContainerID() == tx.getContainerID()) {
-              hasContained = true;
-              break;
-            }
-          }
-
-          if (!hasContained) {
-            txs.add(tx);
-            currentTXNum++;
+      boolean success = false;
+      final ContainerID id = ContainerID.valueof(tx.getContainerID());
+      final ContainerInfo container = containerManager.getContainer(id);
+      final Set<ContainerReplica> replicas = containerManager
+          .getContainerReplicas(id);
+      if (!container.isOpen()) {
+        for (ContainerReplica replica : replicas) {
+          UUID dnID = replica.getDatanodeDetails().getUuid();
+          if (dnsWithTransactionCommitted == null ||
+              !dnsWithTransactionCommitted.contains(dnID)) {
+            // Transaction need not be sent to dns which have
+            // already committed it
+            success = addTransactionToDN(dnID, tx);
           }
         }
-      } else {
-        currentTXNum++;
-        transactions.put(dnID, tx);
       }
-      SCMBlockDeletingService.LOG.debug("Transaction added: {} <- TX({})", dnID,
-          tx.getTxID());
+      return success;
+    } catch (IOException e) {
+      SCMBlockDeletingService.LOG.warn("Got container info error.", e);
+      return false;
     }
+  }
+
+  private boolean addTransactionToDN(UUID dnID, DeletedBlocksTransaction tx) {
+    if (transactions.containsKey(dnID)) {
+      List<DeletedBlocksTransaction> txs = transactions.get(dnID);
+      if (txs != null && txs.size() < maximumAllowedTXNum) {
+        boolean hasContained = false;
+        for (DeletedBlocksTransaction t : txs) {
+          if (t.getContainerID() == tx.getContainerID()) {
+            hasContained = true;
+            break;
+          }
+        }
+
+        if (!hasContained) {
+          txs.add(tx);
+          currentTXNum++;
+          return true;
+        }
+      }
+    } else {
+      currentTXNum++;
+      transactions.put(dnID, tx);
+      return true;
+    }
+    SCMBlockDeletingService.LOG
+        .debug("Transaction added: {} <- TX({})", dnID, tx.getTxID());
+    return false;
   }
 
   Set<UUID> getDatanodeIDs() {

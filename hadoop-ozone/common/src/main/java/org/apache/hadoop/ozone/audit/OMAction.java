@@ -18,34 +18,40 @@
 package org.apache.hadoop.ozone.audit;
 
 /**
- * Enum to define OM Action types for Audit.
+ * Enum to define Audit Action types for OzoneManager.
  */
 public enum OMAction implements AuditAction {
 
-  CREATE_VOLUME("CREATE_VOLUME"),
-  CREATE_BUCKET("CREATE_BUCKET"),
-  CREATE_KEY("CREATE_KEY"),
-  READ_VOLUME("READ_VOLUME"),
-  READ_BUCKET("READ_BUCKET"),
-  READ_KEY("READ_BUCKET"),
-  UPDATE_VOLUME("UPDATE_VOLUME"),
-  UPDATE_BUCKET("UPDATE_BUCKET"),
-  UPDATE_KEY("UPDATE_KEY"),
-  DELETE_VOLUME("DELETE_VOLUME"),
-  DELETE_BUCKET("DELETE_BUCKET"),
-  DELETE_KEY("DELETE_KEY"),
-  SET_OWNER("SET_OWNER"),
-  SET_QUOTA("SET_QUOTA");
-
-  private String action;
-
-  OMAction(String action) {
-    this.action = action;
-  }
+  // WRITE Actions
+  ALLOCATE_BLOCK,
+  ALLOCATE_KEY,
+  COMMIT_KEY,
+  CREATE_VOLUME,
+  CREATE_BUCKET,
+  CREATE_KEY,
+  DELETE_VOLUME,
+  DELETE_BUCKET,
+  DELETE_KEY,
+  RENAME_KEY,
+  SET_OWNER,
+  SET_QUOTA,
+  UPDATE_VOLUME,
+  UPDATE_BUCKET,
+  UPDATE_KEY,
+  // READ Actions
+  CHECK_VOLUME_ACCESS,
+  LIST_BUCKETS,
+  LIST_VOLUMES,
+  LIST_KEYS,
+  READ_VOLUME,
+  READ_BUCKET,
+  READ_KEY,
+  LIST_S3BUCKETS,
+  INITIATE_MULTIPART_UPLOAD;
 
   @Override
   public String getAction() {
-    return this.action;
+    return this.toString();
   }
 
 }

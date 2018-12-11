@@ -19,6 +19,7 @@ package org.apache.hadoop.ozone;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
 import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.om.OzoneManager;
@@ -64,6 +65,14 @@ public interface MiniOzoneCluster {
    * @throws InterruptedException In case of interrupt while waiting
    */
   void waitForClusterToBeReady() throws TimeoutException, InterruptedException;
+
+  /**
+   * Sets the timeout value after which
+   * {@link MiniOzoneCluster#waitForClusterToBeReady} times out.
+   *
+   * @param timeoutInMs timeout value in milliseconds
+   */
+  void setWaitForClusterToBeReadyTimeout(int timeoutInMs);
 
   /**
    * Waits/blocks till the cluster is out of chill mode.
@@ -137,8 +146,11 @@ public interface MiniOzoneCluster {
    * Restarts StorageContainerManager instance.
    *
    * @throws IOException
+   * @throws TimeoutException
+   * @throws InterruptedException
    */
-  void restartStorageContainerManager() throws IOException;
+  void restartStorageContainerManager() throws InterruptedException,
+      TimeoutException, IOException;
 
   /**
    * Restarts OzoneManager instance.
@@ -152,8 +164,16 @@ public interface MiniOzoneCluster {
    *
    * @param i index of HddsDatanode in the MiniOzoneCluster
    */
-  void restartHddsDatanode(int i);
+  void restartHddsDatanode(int i, boolean waitForDatanode)
+      throws InterruptedException, TimeoutException;
 
+  /**
+   * Restart a particular HddsDatanode.
+   *
+   * @param dn HddsDatanode in the MiniOzoneCluster
+   */
+  void restartHddsDatanode(DatanodeDetails dn, boolean waitForDatanode)
+      throws InterruptedException, TimeoutException, IOException;
   /**
    * Shutdown a particular HddsDatanode.
    *
@@ -162,9 +182,31 @@ public interface MiniOzoneCluster {
   void shutdownHddsDatanode(int i);
 
   /**
-   * Shutdown the MiniOzoneCluster.
+   * Shutdown a particular HddsDatanode.
+   *
+   * @param dn HddsDatanode in the MiniOzoneCluster
+   */
+  void shutdownHddsDatanode(DatanodeDetails dn) throws IOException;
+
+  /**
+   * Shutdown the MiniOzoneCluster and delete the storage dirs.
    */
   void shutdown();
+
+  /**
+   * Stop the MiniOzoneCluster without any cleanup.
+   */
+  void stop();
+
+  /**
+   * Start Scm.
+   */
+  void startScm() throws IOException;
+
+  /**
+   * Start DataNodes.
+   */
+  void startHddsDatanodes();
 
   /**
    * Builder class for MiniOzoneCluster.
@@ -188,11 +230,15 @@ public interface MiniOzoneCluster {
 
     protected Boolean ozoneEnabled = true;
     protected Boolean randomContainerPort = true;
-
+    protected Optional<Integer> chunkSize = Optional.empty();
+    protected Optional<Long> streamBufferFlushSize = Optional.empty();
+    protected Optional<Long> streamBufferMaxSize = Optional.empty();
+    protected Optional<Long> blockSize = Optional.empty();
     // Use relative smaller number of handlers for testing
     protected int numOfOmHandlers = 20;
     protected int numOfScmHandlers = 20;
     protected int numOfDatanodes = 1;
+    protected boolean  startDataNodes = true;
 
     protected Builder(OzoneConfiguration conf) {
       this.conf = conf;
@@ -210,6 +256,11 @@ public interface MiniOzoneCluster {
      */
     public Builder setClusterId(String id) {
       clusterId = id;
+      return this;
+    }
+
+    public Builder setStartDataNodes(boolean startDataNodes) {
+      this.startDataNodes = startDataNodes;
       return this;
     }
 
@@ -307,6 +358,46 @@ public interface MiniOzoneCluster {
      */
     public Builder disableOzone() {
       ozoneEnabled = false;
+      return this;
+    }
+
+    /**
+     * Sets the chunk size.
+     *
+     * @return MiniOzoneCluster.Builder
+     */
+    public Builder setChunkSize(int size) {
+      chunkSize = Optional.of(size);
+      return this;
+    }
+
+    /**
+     * Sets the flush size for stream buffer.
+     *
+     * @return MiniOzoneCluster.Builder
+     */
+    public Builder setStreamBufferFlushSize(long size) {
+      streamBufferFlushSize = Optional.of(size);
+      return this;
+    }
+
+    /**
+     * Sets the max size for stream buffer.
+     *
+     * @return MiniOzoneCluster.Builder
+     */
+    public Builder setStreamBufferMaxSize(long size) {
+      streamBufferMaxSize = Optional.of(size);
+      return this;
+    }
+
+    /**
+     * Sets the block size for stream buffer.
+     *
+     * @return MiniOzoneCluster.Builder
+     */
+    public Builder setBlockSize(long size) {
+      blockSize = Optional.of(size);
       return this;
     }
 

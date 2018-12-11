@@ -47,6 +47,7 @@ import org.slf4j.event.Level;
 
 import javax.security.auth.Subject;
 import javax.security.auth.kerberos.KerberosPrincipal;
+import javax.security.auth.kerberos.KerberosTicket;
 import javax.security.auth.kerberos.KeyTab;
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.LoginContext;
@@ -61,6 +62,7 @@ import java.security.PrivilegedExceptionAction;
 import java.util.Collection;
 import java.util.ConcurrentModificationException;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -88,7 +90,10 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 public class TestUserGroupInformation {
@@ -327,15 +332,10 @@ public class TestUserGroupInformation {
     UserGroupInformation.setConfiguration(conf);
     testConstructorSuccess("user1", "user1");
     testConstructorSuccess("user4@OTHER.REALM", "other-user4");
-
-    // pass through test, no transformation
-    testConstructorSuccess("user2@DEFAULT.REALM", "user2@DEFAULT.REALM");
-    testConstructorSuccess("user3/cron@DEFAULT.REALM", "user3/cron@DEFAULT.REALM");
-    testConstructorSuccess("user5/cron@OTHER.REALM", "user5/cron@OTHER.REALM");
-
-    // failures
-    testConstructorFailures("user6@example.com@OTHER.REALM");
-    testConstructorFailures("user7@example.com@DEFAULT.REALM");
+    // failure test
+    testConstructorFailures("user2@DEFAULT.REALM");
+    testConstructorFailures("user3/cron@DEFAULT.REALM");
+    testConstructorFailures("user5/cron@OTHER.REALM");
     testConstructorFailures(null);
     testConstructorFailures("");
   }
@@ -349,13 +349,10 @@ public class TestUserGroupInformation {
 
     testConstructorSuccess("user1", "user1");
     testConstructorSuccess("user2@DEFAULT.REALM", "user2");
-    testConstructorSuccess("user3/cron@DEFAULT.REALM", "user3");
-
-    // no rules applied, local name remains the same
-    testConstructorSuccess("user4@OTHER.REALM", "user4@OTHER.REALM");
-    testConstructorSuccess("user5/cron@OTHER.REALM", "user5/cron@OTHER.REALM");
-
+    testConstructorSuccess("user3/cron@DEFAULT.REALM", "user3");    
     // failure test
+    testConstructorFailures("user4@OTHER.REALM");
+    testConstructorFailures("user5/cron@OTHER.REALM");
     testConstructorFailures(null);
     testConstructorFailures("");
   }
@@ -396,9 +393,8 @@ public class TestUserGroupInformation {
     } catch (IllegalArgumentException e) {
       String expect = (userName == null || userName.isEmpty())
           ? "Null user" : "Illegal principal name "+userName;
-      String expect2 = "Malformed Kerberos name: "+userName;
-      assertTrue("Did not find "+ expect + " or " + expect2 + " in " + e,
-          e.toString().contains(expect) || e.toString().contains(expect2));
+      assertTrue("Did not find "+ expect + " in " + e,
+          e.toString().contains(expect));
     }
   }
 
@@ -1210,5 +1206,38 @@ public class TestUserGroupInformation {
     // unblock the original call.
     barrier.await();
     assertSame(testUgi1.getSubject(), blockingLookup.get().getSubject());
+  }
+
+  @Test
+  public void testKerberosTicketIsDestroyedChecked() throws Exception {
+    // Create UserGroupInformation
+    GenericTestUtils.setLogLevel(UserGroupInformation.LOG, Level.DEBUG);
+    Set<User> users = new HashSet<>();
+    users.add(new User("Foo"));
+    Subject subject =
+        new Subject(true, users, new HashSet<>(), new HashSet<>());
+    UserGroupInformation ugi = spy(new UserGroupInformation(subject));
+
+    // throw IOException in the middle of the autoRenewalForUserCreds
+    doThrow(new IOException()).when(ugi).reloginFromTicketCache();
+
+    // Create and destroy the KerberosTicket, so endTime will be null
+    Date d = new Date();
+    KerberosPrincipal kp = new KerberosPrincipal("Foo");
+    KerberosTicket tgt = spy(new KerberosTicket(new byte[]{}, kp, kp, new
+        byte[]{}, 0, null, d, d, d, d, null));
+    tgt.destroy();
+
+    // run AutoRenewalForUserCredsRunnable with this
+    UserGroupInformation.AutoRenewalForUserCredsRunnable userCredsRunnable =
+        ugi.new TicketCacheRenewalRunnable(tgt,
+            Boolean.toString(Boolean.TRUE), 100);
+
+    // Set the runnable to not to run in a loop
+    userCredsRunnable.setRunRenewalLoop(false);
+    // there should be no exception when calling this
+    userCredsRunnable.run();
+    // isDestroyed should be called at least once
+    Mockito.verify(tgt, atLeastOnce()).isDestroyed();
   }
 }

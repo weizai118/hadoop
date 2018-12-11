@@ -34,6 +34,7 @@ import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.conf.ConfigurationProvider;
 import org.apache.hadoop.yarn.event.Dispatcher;
+import org.apache.hadoop.yarn.nodelabels.NodeAttributesManager;
 import org.apache.hadoop.yarn.server.resourcemanager.ahs.RMApplicationHistoryWriter;
 import org.apache.hadoop.yarn.server.resourcemanager.metrics.SystemMetricsPublisher;
 import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsManager;
@@ -48,17 +49,20 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmapp.monitor.RMAppLifetime
 import org.apache.hadoop.yarn.server.resourcemanager.rmcontainer.ContainerAllocationExpirer;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
-
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.constraint.AllocationTagsManager;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.constraint.PlacementConstraintManager;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.distributed.QueueLimitCalculator;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.placement.MultiNodeSortingManager;
 import org.apache.hadoop.yarn.server.resourcemanager.security.AMRMTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.security.ClientToAMTokenSecretManagerInRM;
 import org.apache.hadoop.yarn.server.resourcemanager.security.DelegationTokenRenewer;
 import org.apache.hadoop.yarn.server.resourcemanager.security.NMTokenSecretManagerInRM;
+import org.apache.hadoop.yarn.server.resourcemanager.security.ProxyCAManager;
 import org.apache.hadoop.yarn.server.resourcemanager.security.RMContainerTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.security.RMDelegationTokenSecretManager;
 import org.apache.hadoop.yarn.server.resourcemanager.timelineservice.RMTimelineCollectorManager;
+import org.apache.hadoop.yarn.server.resourcemanager.volume.csi.VolumeManager;
 import org.apache.hadoop.yarn.server.webproxy.ProxyUriUtils;
 import org.apache.hadoop.yarn.util.Clock;
 
@@ -504,6 +508,11 @@ public class RMContextImpl implements RMContext {
   }
 
   @Override
+  public void setNodeAttributesManager(NodeAttributesManager mgr) {
+    activeServiceContext.setNodeAttributesManager(mgr);
+  }
+
+  @Override
   public AllocationTagsManager getAllocationTagsManager() {
     return activeServiceContext.getAllocationTagsManager();
   }
@@ -536,6 +545,17 @@ public class RMContextImpl implements RMContext {
       RMDelegatedNodeLabelsUpdater delegatedNodeLabelsUpdater) {
     activeServiceContext.setRMDelegatedNodeLabelsUpdater(
         delegatedNodeLabelsUpdater);
+  }
+
+  @Override
+  public MultiNodeSortingManager<SchedulerNode> getMultiNodeSortingManager() {
+    return activeServiceContext.getMultiNodeSortingManager();
+  }
+
+  @Override
+  public void setMultiNodeSortingManager(
+      MultiNodeSortingManager<SchedulerNode> multiNodeSortingManager) {
+    activeServiceContext.setMultiNodeSortingManager(multiNodeSortingManager);
   }
 
   public void setSchedulerRecoveryStartAndWaitTime(long waitTime) {
@@ -619,5 +639,31 @@ public class RMContextImpl implements RMContext {
   public void setResourceProfilesManager(ResourceProfilesManager mgr) {
     this.activeServiceContext.setResourceProfilesManager(mgr);
   }
+
+  @Override
+  public ProxyCAManager getProxyCAManager() {
+    return this.activeServiceContext.getProxyCAManager();
+  }
+
+  @Override
+  public void setProxyCAManager(ProxyCAManager proxyCAManager) {
+    this.activeServiceContext.setProxyCAManager(proxyCAManager);
+  }
+
+  @Override
+  public VolumeManager getVolumeManager() {
+    return activeServiceContext.getVolumeManager();
+  }
+
+  @Override
+  public void setVolumeManager(VolumeManager volumeManager) {
+    this.activeServiceContext.setVolumeManager(volumeManager);
+  }
+
   // Note: Read java doc before adding any services over here.
+
+  @Override
+  public NodeAttributesManager getNodeAttributesManager() {
+    return activeServiceContext.getNodeAttributesManager();
+  }
 }

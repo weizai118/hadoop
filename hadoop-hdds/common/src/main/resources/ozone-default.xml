@@ -53,6 +53,36 @@
     </description>
   </property>
   <property>
+    <name>dfs.container.chunk.write.sync</name>
+    <value>true</value>
+    <tag>OZONE, CONTAINER, MANAGEMENT</tag>
+    <description>Determines whether the chunk writes in the container happen as
+      sync I/0 or buffered I/O operation.
+    </description>
+  </property>
+  <property>
+    <name>dfs.container.ratis.statemachinedata.sync.timeout</name>
+    <value>10s</value>
+    <tag>OZONE, DEBUG, CONTAINER, RATIS</tag>
+    <description>Timeout for StateMachine data writes by Ratis.
+    </description>
+  </property>
+  <property>
+    <name>dfs.container.ratis.statemachinedata.sync.retries</name>
+    <value>-1</value>
+    <tag>OZONE, DEBUG, CONTAINER, RATIS</tag>
+    <description>Number of times the WriteStateMachineData op will be tried
+      before failing, if this value is -1, then this retries indefinitely.
+    </description>
+  </property>
+  <property>
+    <name>dfs.container.ratis.log.queue.size</name>
+    <value>128</value>
+    <tag>OZONE, DEBUG, CONTAINER, RATIS</tag>
+    <description>Number of operation pending with Raft's Log Worker.
+    </description>
+  </property>
+  <property>
     <name>dfs.container.ratis.datanode.storage.dir</name>
     <value/>
     <tag>OZONE, CONTAINER, STORAGE, MANAGEMENT, RATIS</tag>
@@ -75,21 +105,23 @@
     </description>
   </property>
   <property>
+    <name>hdds.datanode.volume.choosing.policy</name>
+    <value/>
+    <tag>OZONE, CONTAINER, STORAGE, MANAGEMENT</tag>
+    <description>
+      The class name of the policy for choosing volumes in the list of
+      directories.  Defaults to
+      org.apache.hadoop.ozone.container.common.volume.RoundRobinVolumeChoosingPolicy.
+      This volume choosing policy selects volumes in a round-robin order.
+    </description>
+  </property>
+  <property>
     <name>dfs.container.ratis.enabled</name>
     <value>false</value>
     <tag>OZONE, MANAGEMENT, PIPELINE, RATIS</tag>
     <description>Ozone supports different kinds of replication pipelines. Ratis
       is one of
       the replication pipeline supported by ozone.
-    </description>
-  </property>
-  <property>
-    <name>dfs.container.grpc.enabled</name>
-    <value>false</value>
-    <tag>OZONE, MANAGEMENT, PIPELINE, RATIS</tag>
-    <description>Ozone supports different kinds of replication pipelines
-      protocols. grpc is one of the replication pipeline protocol supported by
-      ozone.
     </description>
   </property>
   <property>
@@ -117,6 +149,14 @@
     </description>
   </property>
   <property>
+    <name>dfs.ratis.snapshot.threshold</name>
+    <value>10000</value>
+    <tag>OZONE, RATIS</tag>
+    <description>Number of transactions after which a ratis snapshot should be
+      taken.
+    </description>
+  </property>
+  <property>
     <name>dfs.container.ratis.num.write.chunk.threads</name>
     <value>60</value>
     <tag>OZONE, RATIS, PERFORMANCE</tag>
@@ -125,19 +165,44 @@
     </description>
   </property>
   <property>
+    <name>dfs.container.ratis.replication.level</name>
+    <value>MAJORITY</value>
+    <tag>OZONE, RATIS</tag>
+    <description>Replication level to be used by datanode for submitting a
+      container command to ratis. Available replication levels are ALL and
+      MAJORTIY, MAJORITY is used as the default replication level.
+    </description>
+  </property>
+  <property>
+    <name>dfs.container.ratis.num.container.op.executors</name>
+    <value>10</value>
+    <tag>OZONE, RATIS, PERFORMANCE</tag>
+    <description>Number of executors that will be used by Ratis to execute
+      container ops.(10 by default).
+    </description>
+  </property>
+  <property>
     <name>dfs.container.ratis.segment.size</name>
-    <value>1073741824</value>
+    <value>16KB</value>
     <tag>OZONE, RATIS, PERFORMANCE</tag>
     <description>The size of the raft segment used by Apache Ratis on datanodes.
-      (1 GB by default)
+      (16 KB by default)
     </description>
   </property>
   <property>
     <name>dfs.container.ratis.segment.preallocated.size</name>
-    <value>134217728</value>
+    <value>128MB</value>
     <tag>OZONE, RATIS, PERFORMANCE</tag>
     <description>The size of the buffer which is preallocated for raft segment
       used by Apache Ratis on datanodes.(128 MB by default)
+    </description>
+  </property>
+  <property>
+    <name>dfs.container.ratis.statemachine.cache.expiry.interval</name>
+    <value>10s</value>
+    <tag>OZONE, RATIS, PERFORMANCE</tag>
+    <description>The interval till which the stateMachine data in ratis
+      will be cached inside the ContainerStateMachine.
     </description>
   </property>
   <property>
@@ -147,10 +212,46 @@
     <description>The timeout duration for ratis client request.</description>
   </property>
   <property>
+    <name>dfs.ratis.client.request.max.retries</name>
+    <value>180</value>
+    <tag>OZONE, RATIS, MANAGEMENT</tag>
+    <description>Number of retries for ratis client request.</description>
+  </property>
+  <property>
+    <name>dfs.ratis.client.request.retry.interval</name>
+    <value>100ms</value>
+    <tag>OZONE, RATIS, MANAGEMENT</tag>
+    <description>Interval between successive retries for a ratis client request.
+    </description>
+  </property>
+  <property>
+    <name>dfs.ratis.server.retry-cache.timeout.duration</name>
+    <value>600000ms</value>
+    <tag>OZONE, RATIS, MANAGEMENT</tag>
+    <description>Retry Cache entry timeout for ratis server.</description>
+  </property>
+  <property>
     <name>dfs.ratis.server.request.timeout.duration</name>
     <value>3s</value>
     <tag>OZONE, RATIS, MANAGEMENT</tag>
     <description>The timeout duration for ratis server request.</description>
+  </property>
+  <property>
+    <name>dfs.ratis.leader.election.minimum.timeout.duration</name>
+    <value>1s</value>
+    <tag>OZONE, RATIS, MANAGEMENT</tag>
+    <description>The minimum timeout duration for ratis leader election.
+        Default is 1s.
+    </description>
+  </property>
+  <property>
+    <name>dfs.ratis.server.failure.duration</name>
+    <value>120s</value>
+    <tag>OZONE, RATIS, MANAGEMENT</tag>
+    <description>The timeout duration for ratis server failure detection,
+      once the threshold has reached, the ratis state machine will be informed
+      about the failure in the ratis ring
+    </description>
   </property>
   <property>
     <name>hdds.node.report.interval</name>
@@ -177,6 +278,25 @@
       received from SCM to SCM. Unit could be defined with postfix
       (ns,ms,s,m,h,d)</description>
   </property>
+  <property>
+    <name>hdds.pipeline.report.interval</name>
+    <value>60000ms</value>
+    <tag>OZONE, PIPELINE, MANAGEMENT</tag>
+    <description>Time interval of the datanode to send pipeline report. Each
+      datanode periodically send pipeline report to SCM. Unit could be
+      defined with postfix (ns,ms,s,m,h,d)</description>
+  </property>
+
+
+  <property>
+    <name>hdds.prometheus.endpoint.enabled</name>
+    <value>false</value>
+    <tag>OZONE, MANAGEMENT</tag>
+    <description>Enable prometheus compatible metric page on the HTTP
+      servers.
+    </description>
+  </property>
+
   <!--Ozone Settings-->
   <property>
     <name>ozone.administrators</name>
@@ -242,6 +362,32 @@
     </description>
   </property>
   <property>
+    <name>ozone.client.stream.buffer.flush.size</name>
+    <value>64MB</value>
+    <tag>OZONE, CLIENT</tag>
+    <description>Size which determines at what buffer position , a partial
+      flush will be initiated during write. It should be ideally a multiple
+      of chunkSize.
+    </description>
+  </property>
+  <property>
+    <name>ozone.client.stream.buffer.max.size</name>
+    <value>128MB</value>
+    <tag>OZONE, CLIENT</tag>
+    <description>Size which determines at what buffer position,
+      write call be blocked till acknowledgement of the first partial flush
+      happens by all servers.
+    </description>
+  </property>
+  <property>
+    <name>ozone.client.watch.request.timeout</name>
+    <value>30s</value>
+    <tag>OZONE, CLIENT</tag>
+    <description>Timeout for the watch API in Ratis client to acknowledge
+      a particular request getting replayed to all servers.
+    </description>
+  </property>
+  <property>
     <name>ozone.client.protocol</name>
     <value>org.apache.hadoop.ozone.client.rpc.RpcClient</value>
     <tag>OZONE, CLIENT, MANAGEMENT</tag>
@@ -273,17 +419,6 @@
       the cluster.
 
       Please note: By default ozone is disabled on a hadoop cluster.
-    </description>
-  </property>
-  <property>
-    <name>ozone.handler.type</name>
-    <value>distributed</value>
-    <tag>OZONE, REST</tag>
-    <description>
-      Tells ozone which storage handler to use. The possible values are:
-      distributed - The Ozone distributed storage handler, which speaks to
-      OM/SCM on the backend and provides REST services to clients.
-      local - Local Storage handler strictly for testing - To be removed.
     </description>
   </property>
   <property>
@@ -415,31 +550,30 @@
     </description>
   </property>
   <property>
-    <name>ozone.localstorage.root</name>
-    <value>${hadoop.tmp.dir}/ozone</value>
-    <tag>OZONE, DEBUG</tag>
+    <name>ozone.om.db.dirs</name>
+    <value/>
+    <tag>OZONE, OM, STORAGE, PERFORMANCE</tag>
     <description>
-      This is used only for testing purposes. This value is used by the local
-      storage handler to simulate a REST backend. This is useful only when
-      debugging the REST front end independent of OM and SCM. To be removed.
+      Directory where the OzoneManager stores its metadata. This should
+      be specified as a single directory. If the directory does not
+      exist then the OM will attempt to create it.
+
+      If undefined, then the OM will log a warning and fallback to
+      ozone.metadata.dirs.
     </description>
   </property>
   <property>
     <name>ozone.metadata.dirs</name>
     <value/>
-    <tag>OZONE, OM, SCM, CONTAINER, REQUIRED, STORAGE</tag>
+    <tag>OZONE, OM, SCM, CONTAINER, STORAGE</tag>
     <description>
-      Ozone metadata is shared among OM, which acts as the namespace
-      manager for ozone, SCM which acts as the block manager and data nodes
-      which maintain the name of the key(Key Name and BlockIDs). This
-      replicated and distributed metadata store is maintained under the
-      directory pointed by this key. Since metadata can be I/O intensive, at
-      least on OM and SCM we recommend having SSDs. If you have the luxury
-      of mapping this path to SSDs on all machines in the cluster, that will
-      be excellent.
+      This setting is the fallback location for SCM, OM and DataNodes
+      to store their metadata. This setting may be used in test/PoC clusters
+      to simplify configuration.
 
-      If Ratis metadata directories are not specified, Ratis server will emit a
-      warning and use this path for storing its metadata too.
+      For production clusters or any time you care about performance, it is
+      recommended that ozone.om.db.dirs, ozone.scm.db.dirs and
+      dfs.container.ratis.datanode.storage.dir be configured separately.
     </description>
   </property>
   <property>
@@ -456,7 +590,7 @@
 
   <property>
     <name>ozone.metastore.rocksdb.statistics</name>
-    <value>ALL</value>
+    <value>OFF</value>
     <tag>OZONE, OM, SCM, STORAGE, PERFORMANCE</tag>
     <description>
       The statistics level of the rocksdb store. If you use any value from
@@ -467,7 +601,19 @@
       Check the rocksdb documentation for more details.
     </description>
   </property>
+  <property>
+    <name>ozone.scm.db.dirs</name>
+    <value/>
+    <tag>OZONE, SCM, STORAGE, PERFORMANCE</tag>
+    <description>
+      Directory where the StorageContainerManager stores its metadata.
+      This should be specified as a single directory. If the directory
+      does not exist then the SCM will attempt to create it.
 
+      If undefined, then the SCM will log a warning and fallback to
+      ozone.metadata.dirs.
+    </description>
+  </property>
   <property>
     <name>ozone.scm.block.client.address</name>
     <value/>
@@ -504,17 +650,17 @@
     </description>
   </property>
   <property>
-    <name>ozone.scm.block.size.in.mb</name>
-    <value>256</value>
+    <name>ozone.scm.block.size</name>
+    <value>256MB</value>
     <tag>OZONE, SCM</tag>
     <description>
-      The default size of a scm block in bytes. This is maps to the default
+      The default size of a scm block. This is maps to the default
       Ozone block size.
     </description>
   </property>
   <property>
     <name>ozone.scm.chunk.size</name>
-    <value>16777216</value>
+    <value>16MB</value>
     <tag>OZONE, SCM, CONTAINER, PERFORMANCE</tag>
     <description>
       The chunk size for reading/writing chunk operations in bytes.
@@ -600,12 +746,11 @@
     </description>
   </property>
   <property>
-    <name>ozone.scm.container.size.gb</name>
-    <value>5</value>
+    <name>ozone.scm.container.size</name>
+    <value>5GB</value>
     <tag>OZONE, PERFORMANCE, MANAGEMENT</tag>
     <description>
-      Default container size used by Ozone. This value is specified
-      in GB.
+      Default container size used by Ozone.
       There are two considerations while picking this number. The speed at which
       a container can be replicated, determined by the network speed and the
       metadata that each container generates. So selecting a large number
@@ -703,6 +848,8 @@
       OM/SCM eventually. So a 30 second HB seems to work. This assumes that
       replication strategy used is Ratis if not, this value should be set to
       something smaller like 3 seconds.
+      ozone.scm.pipeline.close.timeout should also be adjusted accordingly,
+      if the default value for this config is not used.
     </description>
   </property>
   <property>
@@ -719,10 +866,10 @@
   </property>
   <property>
     <name>ozone.scm.heartbeat.rpc-timeout</name>
-    <value>1000</value>
+    <value>1s</value>
     <tag>OZONE, MANAGEMENT</tag>
     <description>
-      Timeout value for the RPC from Datanode to SCM in milliseconds.
+      Timeout value for the RPC from Datanode to SCM.
     </description>
   </property>
   <property>
@@ -804,7 +951,7 @@
   <property>
     <name>ozone.scm.names</name>
     <value/>
-    <tag>OZONE</tag>
+    <tag>OZONE, REQUIRED</tag>
     <description>
       The value of this property is a set of DNS | DNS:PORT | IP
       Address | IP:PORT. Written as a comma separated string. e.g. scm1,
@@ -934,9 +1081,9 @@
     </description>
   </property>
   <property>
-    <name>ozone.scm.container.close.threshold</name>
+    <name>hdds.container.close.threshold</name>
     <value>0.9f</value>
-    <tag>OZONE, SCM</tag>
+    <tag>OZONE, DATANODE</tag>
     <description>
       This determines the threshold to be used for closing a container.
       When the container used percentage reaches this threshold,
@@ -986,12 +1133,13 @@
 
   <property>
     <name>hadoop.tags.custom</name>
-    <value>OZONE,MANAGEMENT,SECURITY,PERFORMANCE,DEBUG,CLIENT,SERVER,OM,SCM,CRITICAL,RATIS,CONTAINER,REQUIRED,REST,STORAGE,PIPELINE,STANDALONE</value>
+    <value>OZONE,MANAGEMENT,SECURITY,PERFORMANCE,DEBUG,CLIENT,SERVER,OM,SCM,CRITICAL,RATIS,CONTAINER,REQUIRED,REST,STORAGE,PIPELINE,STANDALONE,S3GATEWAY</value>
   </property>
 
   <property>
     <name>ozone.tags.system</name>
-    <value>OZONE,MANAGEMENT,SECURITY,PERFORMANCE,DEBUG,CLIENT,SERVER,OM,SCM,CRITICAL,RATIS,CONTAINER,REQUIRED,REST,STORAGE,PIPELINE,STANDALONE</value>
+    <value>OZONE,MANAGEMENT,SECURITY,PERFORMANCE,DEBUG,CLIENT,SERVER,OM,SCM,
+      CRITICAL,RATIS,CONTAINER,REQUIRED,REST,STORAGE,PIPELINE,STANDALONE,S3GATEWAY,ACL</value>
   </property>
 
 
@@ -1057,27 +1205,6 @@
   </property>
 
   <property>
-    <name>hdds.write.lock.reporting.threshold.ms</name>
-    <value>5000</value>
-    <tag>OZONE, DATANODE, MANAGEMENT</tag>
-    <description>
-      When a write lock is held for a long time, this will be logged as the
-      lock is released. This sets how long the lock must be held for logging
-      to occur.
-    </description>
-  </property>
-
-  <property>
-    <name>hdds.lock.suppress.warning.interval.ms</name>
-    <value>10000</value>
-    <tag>OZONE, DATANODE, MANAGEMENT</tag>
-    <description>
-      Instrumentation reporting long critical sections will suppress
-      consecutive warnings within this interval.
-    </description>
-  </property>
-
-  <property>
     <name>hdds.command.status.report.interval</name>
     <value>30s</value>
     <tag>OZONE, DATANODE, MANAGEMENT</tag>
@@ -1086,15 +1213,47 @@
       postfix (ns,ms,s,m,h,d)</description>
   </property>
   <property>
-    <name>ozone.scm.pipeline.creation.lease.timeout</name>
-    <value>60s</value>
+    <name>ozone.scm.pipeline.destroy.timeout</name>
+    <value>300s</value>
     <tag>OZONE, SCM, PIPELINE</tag>
     <description>
-      Pipeline creation timeout in milliseconds to be used by SCM. When
-      BEGIN_CREATE event happens the pipeline is moved from ALLOCATED to
-      CREATING state, SCM will now wait for the configured amount of time
-      to get COMPLETE_CREATE event if it doesn't receive it will move the
-      pipeline to DELETING.
+      Once a pipeline is closed, SCM should wait for the above configured time
+      before destroying a pipeline.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.scm.chillmode.threshold.pct</name>
+    <value>0.99</value>
+    <tag>HDDS,SCM,OPERATION</tag>
+    <description> % of containers which should have at least one
+      reported replica before SCM comes out of chill mode.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.scm.chillmode.enabled</name>
+    <value>true</value>
+    <tag>HDDS,SCM,OPERATION</tag>
+    <description>Boolean value to enable or disable SCM chill mode.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.scm.chillmode.min.datanode</name>
+    <value>1</value>
+    <tag>HDDS,SCM,OPERATION</tag>
+    <description>Minimum DataNodes which should be registered to get SCM out of
+      chill mode.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.scm.chillmode.pipeline-availability.check</name>
+    <value>false</value>
+    <tag>HDDS,SCM,OPERATION</tag>
+    <description>
+      Boolean value to enable pipeline availability check during SCM chill mode.
     </description>
   </property>
 
@@ -1106,6 +1265,266 @@
       Maximum number of Container Actions sent by the datanode to SCM in a
       single heartbeat.
     </description>
+  </property>
+
+  <property>
+    <name>hdds.pipeline.action.max.limit</name>
+    <value>20</value>
+    <tag>DATANODE</tag>
+    <description>
+      Maximum number of Pipeline Actions sent by the datanode to SCM in a
+      single heartbeat.
+    </description>
+  </property>
+  <property>
+    <name>hdds.scm.watcher.timeout</name>
+    <value>10m</value>
+    <tag>OZONE, SCM, MANAGEMENT</tag>
+    <description>
+      Timeout for the watchers of the HDDS SCM CommandWatchers. After this
+      duration the Copy/Delete container commands will be sent again to the
+      datanode unless the datanode confirms the completion.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.db.profile</name>
+    <value>DISK</value>
+    <tag>OZONE, OM, PERFORMANCE</tag>
+    <description>This property allows user to pick a configuration
+    that tunes the RocksDB settings for the hardware it is running
+    on. Right now, we have SSD and DISK as profile options.</description>
+  </property>
+
+  <property>
+    <name>hdds.datanode.replication.work.dir</name>
+    <tag>DATANODE</tag>
+    <description>Temporary which is used during the container replication
+      betweeen datanodes. Should have enough space to store multiple container
+      (in compressed format), but doesn't require fast io access such as SSD.
+    </description>
+  </property>
+
+  <property>
+    <name>hdds.lock.max.concurrency</name>
+    <value>100</value>
+    <tag>HDDS</tag>
+    <description>Locks in HDDS/Ozone uses object pool to maintain active locks
+      in the system, this property defines the max limit for the locks that
+      will be maintained in the pool.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.authentication.kerberos.principal</name>
+    <value/>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The server principal used by Ozone S3Gateway server. This is
+      typically set to
+      HTTP/_HOST@REALM.TLD The SPNEGO server principal begins with the prefix
+      HTTP/ by convention.</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.domain.name</name>
+    <value/>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>List of Ozone S3Gateway domain names. If multiple
+      domain names to be provided, they should be a "," seperated.
+      This parameter is only required when virtual host style pattern is
+      followed.</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.http-address</name>
+    <value>0.0.0.0:9878</value>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The address and the base port where the Ozone S3Gateway
+      Server will
+      listen on.</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.http-bind-host</name>
+    <value>0.0.0.0</value>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The actual address the HTTP server will bind to. If this optional address
+      is set, it overrides only the hostname portion of ozone.s3g.http-address.
+      This is useful for making the Ozone S3Gateway HTTP server listen on all
+      interfaces by setting it to 0.0.0.0.</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.http.enabled</name>
+    <value>true</value>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The boolean which enables the Ozone S3Gateway server
+      .</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.https-address</name>
+    <value/>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>Ozone S3Gateway serverHTTPS server address and port
+      .</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.https-bind-host</name>
+    <value/>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The actual address the HTTPS server will bind to. If this optional address
+      is set, it overrides only the hostname portion of ozone.s3g.https-address.
+      This is useful for making the Ozone S3Gateway HTTPS server listen on all
+      interfaces by setting it to 0.0.0.0.</description>
+  </property>
+
+  <property>
+    <name>ozone.s3g.keytab.file</name>
+    <value/>
+    <tag>OZONE, S3GATEWAY</tag>
+    <description>The keytab file used by the S3Gateway server to login as its
+      service principal. </description>
+  </property>
+
+  <property>
+    <name>ozone.om.save.metrics.interval</name>
+    <value>5m</value>
+    <tag>OZONE, OM</tag>
+    <description>Time interval used to store the omMetrics in to a
+      file. Background thread perodically stores the OM metrics in to a
+      file. Unit could be defined with postfix (ns,ms,s,m,h,d)
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.client.checksum.type</name>
+    <value>SHA256</value>
+    <tag>OZONE, CLIENT, MANAGEMENT</tag>
+    <description>The checksum type [NONE/ CRC32/ CRC32C/ SHA256/ MD5] determines
+      which algorithm would be used to compute checksum for chunk data.
+      Default checksum type is SHA256.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.client.bytes.per.checksum</name>
+    <value>1MB</value>
+    <tag>OZONE, CLIENT, MANAGEMENT</tag>
+    <description>Checksum will be computed for every bytes per checksum number
+      of bytes and stored sequentially. The minimum value for this config is
+      256KB.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.enable</name>
+    <value>false</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>Property to enable or disable Ratis server on OM.
+    Please note - this is a temporary property to disable OM Ratis server.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.port</name>
+    <value>9872</value>
+    <tag>OZONE, OM, RATIS</tag>
+    <description>
+      The port number of the OzoneManager's Ratis server.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.random.port</name>
+    <value>false</value>
+    <tag>OZONE, OM, RATIS, DEBUG</tag>
+    <description>Allocates a random free port for OM's Ratis server. This is
+      used only while running unit tests.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.rpc.type</name>
+    <value>GRPC</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>Ratis supports different kinds of transports like netty, GRPC,
+      Hadoop RPC etc. This picks one of those for this cluster.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.storage.dir</name>
+    <value/>
+    <tag>OZONE, OM, STORAGE, MANAGEMENT, RATIS</tag>
+    <description>This directory is used for storing OM's Ratis metadata like
+      logs. If this is not set then default metadata dirs is used. A warning
+      will be logged if this not set. Ideally, this should be mapped to a
+      fast disk like an SSD.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.segment.size</name>
+    <value>16KB</value>
+    <tag>OZONE, OM, RATIS, PERFORMANCE</tag>
+    <description>The size of the raft segment used by Apache Ratis on OM.
+      (16 KB by default)
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.segment.preallocated.size</name>
+    <value>128MB</value>
+    <tag>OZONE, OM, RATIS, PERFORMANCE</tag>
+    <description>The size of the buffer which is preallocated for raft segment
+      used by Apache Ratis on OM.(128 MB by default)
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.server.request.timeout</name>
+    <value>3s</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>The timeout duration for OM's ratis server request .</description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.server.retry.cache.timeout</name>
+    <value>600000ms</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>Retry Cache entry timeout for OM's ratis server.</description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.minimum.timeout</name>
+    <value>1s</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>The minimum timeout duration for OM's Ratis server rpc.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.om.ratis.client.request.timeout</name>
+    <value>3s</value>
+    <tag>OZONE, OM, RATIS, MANAGEMENT</tag>
+    <description>The timeout duration for OM Ratis client request.
+    </description>
+  </property>
+
+  <property>
+    <name>ozone.acl.authorizer.class</name>
+    <value>org.apache.hadoop.ozone.security.acl.OzoneAccessAuthorizer</value>
+    <tag>OZONE, SECURITY, ACL</tag>
+    <description>Acl authorizer for Ozone.
+    </description>
+  </property>
+  <property>
+    <name>ozone.acl.enabled</name>
+    <value>false</value>
+    <tag>OZONE, SECURITY, ACL</tag>
+    <description>Key to enable/disable ozone acls.</description>
   </property>
 
 </configuration>

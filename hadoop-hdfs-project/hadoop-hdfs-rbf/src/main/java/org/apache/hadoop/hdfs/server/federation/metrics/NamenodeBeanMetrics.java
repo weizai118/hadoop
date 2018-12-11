@@ -321,6 +321,16 @@ public class NamenodeBeanMetrics
   }
 
   @Override
+  public long getHighestPriorityLowRedundancyReplicatedBlocks() {
+    return 0;
+  }
+
+  @Override
+  public long getHighestPriorityLowRedundancyECBlocks() {
+    return 0;
+  }
+
+  @Override
   public String getCorruptFiles() {
     return "N/A";
   }
@@ -695,5 +705,10 @@ public class NamenodeBeanMetrics
   @Override
   public int getNumEncryptionZones() {
     return 0;
+  }
+
+  @Override
+  public String getVerifyECWithTopologyResult() {
+    return null;
   }
 }

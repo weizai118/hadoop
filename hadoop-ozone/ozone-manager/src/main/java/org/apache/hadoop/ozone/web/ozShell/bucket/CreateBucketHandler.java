@@ -17,59 +17,42 @@
  */
 package org.apache.hadoop.ozone.web.ozShell.bucket;
 
-import org.apache.commons.cli.CommandLine;
 import org.apache.hadoop.ozone.client.OzoneBucket;
+import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.client.OzoneClientUtils;
 import org.apache.hadoop.ozone.client.OzoneVolume;
-import org.apache.hadoop.ozone.client.OzoneClientException;
-import org.apache.hadoop.ozone.client.rest.OzoneException;
 import org.apache.hadoop.ozone.web.ozShell.Handler;
+import org.apache.hadoop.ozone.web.ozShell.OzoneAddress;
 import org.apache.hadoop.ozone.web.ozShell.Shell;
 import org.apache.hadoop.ozone.web.utils.JsonUtils;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
 
 /**
  * create bucket handler.
  */
+@Command(name = "create",
+    description = "creates a bucket in a given volume")
 public class CreateBucketHandler extends Handler {
 
-  private String volumeName;
-  private String bucketName;
+  @Parameters(arity = "1..1", description = Shell.OZONE_BUCKET_URI_DESCRIPTION)
+  private String uri;
 
   /**
    * Executes create bucket.
-   *
-   * @param cmd - CommandLine
-   *
-   * @throws IOException
-   * @throws OzoneException
-   * @throws URISyntaxException
    */
   @Override
-  protected void execute(CommandLine cmd)
-      throws IOException, OzoneException, URISyntaxException {
-    if (!cmd.hasOption(Shell.CREATE_BUCKET)) {
-      throw new OzoneClientException(
-          "Incorrect call : createBucket is missing");
-    }
+  public Void call() throws Exception {
 
-    String ozoneURIString = cmd.getOptionValue(Shell.CREATE_BUCKET);
-    URI ozoneURI = verifyURI(ozoneURIString);
-    Path path = Paths.get(ozoneURI.getPath());
-    if (path.getNameCount() < 2) {
-      throw new OzoneClientException(
-          "volume and bucket name required in createBucket");
-    }
+    OzoneAddress address = new OzoneAddress(uri);
+    address.ensureBucketAddress();
+    OzoneClient client = address.createClient(createOzoneConfiguration());
 
-    volumeName = path.getName(0).toString();
-    bucketName = path.getName(1).toString();
+    String volumeName = address.getVolumeName();
+    String bucketName = address.getBucketName();
 
-    if (cmd.hasOption(Shell.VERBOSE)) {
+    if (isVerbose()) {
       System.out.printf("Volume Name : %s%n", volumeName);
       System.out.printf("Bucket Name : %s%n", bucketName);
     }
@@ -77,10 +60,11 @@ public class CreateBucketHandler extends Handler {
     OzoneVolume vol = client.getObjectStore().getVolume(volumeName);
     vol.createBucket(bucketName);
 
-    if (cmd.hasOption(Shell.VERBOSE)) {
+    if (isVerbose()) {
       OzoneBucket bucket = vol.getBucket(bucketName);
       System.out.printf(JsonUtils.toJsonStringWithDefaultPrettyPrinter(
           JsonUtils.toJsonString(OzoneClientUtils.asBucketInfo(bucket))));
     }
+    return null;
   }
 }

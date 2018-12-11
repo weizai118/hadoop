@@ -58,13 +58,11 @@ public class CommandStatusReportHandler implements
         publisher.fireEvent(SCMEvents.REPLICATION_STATUS, new
             ReplicationStatus(cmdStatus));
         break;
-      case closeContainerCommand:
-        publisher.fireEvent(SCMEvents.CLOSE_CONTAINER_STATUS, new
-            CloseContainerStatus(cmdStatus));
-        break;
       case deleteBlocksCommand:
-        publisher.fireEvent(SCMEvents.DELETE_BLOCK_STATUS, new
-            DeleteBlockCommandStatus(cmdStatus));
+        if (cmdStatus.getStatus() == CommandStatus.Status.EXECUTED) {
+          publisher.fireEvent(SCMEvents.DELETE_BLOCK_STATUS,
+              new DeleteBlockStatus(cmdStatus));
+        }
         break;
       default:
         LOGGER.debug("CommandStatus of type:{} not handled in " +
@@ -103,7 +101,7 @@ public class CommandStatusReportHandler implements
    * Wrapper event for Replicate Command.
    */
   public static class ReplicationStatus extends CommandStatusEvent {
-    ReplicationStatus(CommandStatus cmdStatus) {
+    public ReplicationStatus(CommandStatus cmdStatus) {
       super(cmdStatus);
     }
   }
@@ -112,7 +110,7 @@ public class CommandStatusReportHandler implements
    * Wrapper event for CloseContainer Command.
    */
   public static class CloseContainerStatus extends CommandStatusEvent {
-    CloseContainerStatus(CommandStatus cmdStatus) {
+    public CloseContainerStatus(CommandStatus cmdStatus) {
       super(cmdStatus);
     }
   }
@@ -120,8 +118,8 @@ public class CommandStatusReportHandler implements
   /**
    * Wrapper event for DeleteBlock Command.
    */
-  public static class DeleteBlockCommandStatus extends CommandStatusEvent {
-    DeleteBlockCommandStatus(CommandStatus cmdStatus) {
+  public static class DeleteBlockStatus extends CommandStatusEvent {
+    public DeleteBlockStatus(CommandStatus cmdStatus) {
       super(cmdStatus);
     }
   }

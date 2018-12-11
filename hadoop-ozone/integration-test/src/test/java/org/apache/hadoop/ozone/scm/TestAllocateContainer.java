@@ -30,8 +30,6 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import java.io.IOException;
-
 /**
  * Test allocate container calls.
  */
@@ -71,7 +69,7 @@ public class TestAllocateContainer {
         xceiverClientManager.getFactor(),
         containerOwner);
     Assert.assertNotNull(container);
-    Assert.assertNotNull(container.getPipeline().getLeader());
+    Assert.assertNotNull(container.getPipeline().getFirstNode());
 
   }
 

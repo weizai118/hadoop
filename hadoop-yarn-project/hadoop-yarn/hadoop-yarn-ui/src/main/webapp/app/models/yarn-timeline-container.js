@@ -31,6 +31,7 @@ export default DS.Model.extend({
   containerState: DS.attr('string'),
   nodeHttpAddress: DS.attr('string'),
   nodeId: DS.attr('string'),
+  diagnosticsInfo: DS.attr('string'),
 
   startTs: function() {
     return Converter.dateToTimeStamp(this.get("startedTime"));
@@ -65,5 +66,5 @@ export default DS.Model.extend({
   masterNodeURL: function() {
     var addr = encodeURIComponent(this.get("nodeHttpAddress"));
     return `#/yarn-node/${this.get("nodeId")}/${addr}/info/`;
-  }.property("nodeId", "nodeHttpAddress"),
+  }.property("nodeId", "nodeHttpAddress")
 });

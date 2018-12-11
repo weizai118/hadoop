@@ -49,7 +49,6 @@ import org.apache.hadoop.classification.InterfaceStability;
 @InterfaceAudience.Public
 @InterfaceStability.Unstable
 @ApiModel(description = "One or more components of the service. If the service is HBase say, then the component can be a simple role like master or regionserver. If the service is a complex business webapp then a component can be other services say Kafka or Storm. Thereby it opens up the support for complex and nested services.")
-@javax.annotation.Generated(value = "class io.swagger.codegen.languages.JavaClientCodegen", date = "2016-06-02T08:15:05.615-07:00")
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -79,6 +78,10 @@ public class Component implements Serializable {
   @JsonProperty("number_of_containers")
   @XmlElement(name = "number_of_containers")
   private Long numberOfContainers = null;
+
+  @JsonProperty("decommissioned_instances")
+  @XmlElement(name = "decommissioned_instances")
+  private List<String> decommissionedInstances = new ArrayList<>();
 
   @JsonProperty("run_privileged_container")
   @XmlElement(name = "run_privileged_container")
@@ -294,6 +297,28 @@ public class Component implements Serializable {
 
   public void setNumberOfContainers(Long numberOfContainers) {
     this.numberOfContainers = numberOfContainers;
+  }
+
+  /**
+   * A list of decommissioned component instances.
+   **/
+  public Component decommissionedInstances(List<String>
+      decommissionedInstances) {
+    this.decommissionedInstances = decommissionedInstances;
+    return this;
+  }
+
+  @ApiModelProperty(example = "null", value = "A list of decommissioned component instances.")
+  public List<String> getDecommissionedInstances() {
+    return decommissionedInstances;
+  }
+
+  public void setDecommissionedInstances(List<String> decommissionedInstances) {
+    this.decommissionedInstances = decommissionedInstances;
+  }
+
+  public void addDecommissionedInstance(String componentInstanceName) {
+    this.decommissionedInstances.add(componentInstanceName);
   }
 
   @ApiModelProperty(example = "null", value = "Containers of a started component. Specifying a value for this attribute for the POST payload raises a validation error. This blob is available only in the GET response of a started service.")

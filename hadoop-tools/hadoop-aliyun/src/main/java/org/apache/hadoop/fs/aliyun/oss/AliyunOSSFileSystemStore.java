@@ -82,6 +82,7 @@ import static org.apache.hadoop.fs.aliyun.oss.Constants.*;
 public class AliyunOSSFileSystemStore {
   public static final Logger LOG =
       LoggerFactory.getLogger(AliyunOSSFileSystemStore.class);
+  private String username;
   private FileSystem.Statistics statistics;
   private OSSClient ossClient;
   private String bucketName;
@@ -90,8 +91,9 @@ public class AliyunOSSFileSystemStore {
   private int maxKeys;
   private String serverSideEncryptionAlgorithm;
 
-  public void initialize(URI uri, Configuration conf,
+  public void initialize(URI uri, Configuration conf, String user,
                          FileSystem.Statistics stat) throws IOException {
+    this.username = user;
     statistics = stat;
     ClientConfiguration clientConf = new ClientConfiguration();
     clientConf.setMaxConnections(conf.getInt(MAXIMUM_CONNECTIONS_KEY,
@@ -149,7 +151,7 @@ public class AliyunOSSFileSystemStore {
           "null or empty. Please set proper endpoint with 'fs.oss.endpoint'.");
     }
     CredentialsProvider provider =
-        AliyunOSSUtils.getCredentialsProvider(conf);
+        AliyunOSSUtils.getCredentialsProvider(uri, conf);
     ossClient = new OSSClient(endPoint, provider, clientConf);
     uploadPartSize = AliyunOSSUtils.getMultipartSizeProperty(conf,
         MULTIPART_UPLOAD_PART_SIZE_KEY, MULTIPART_UPLOAD_PART_SIZE_DEFAULT);
@@ -168,15 +170,17 @@ public class AliyunOSSFileSystemStore {
       multipartThreshold = 1024 * 1024 * 1024;
     }
 
+    bucketName = uri.getHost();
+
     String cannedACLName = conf.get(CANNED_ACL_KEY, CANNED_ACL_DEFAULT);
     if (StringUtils.isNotEmpty(cannedACLName)) {
       CannedAccessControlList cannedACL =
           CannedAccessControlList.valueOf(cannedACLName);
       ossClient.setBucketAcl(bucketName, cannedACL);
+      statistics.incrementWriteOps(1);
     }
 
     maxKeys = conf.getInt(MAX_PAGING_KEYS_KEY, MAX_PAGING_KEYS_DEFAULT);
-    bucketName = uri.getHost();
   }
 
   /**
@@ -215,6 +219,7 @@ public class AliyunOSSFileSystemStore {
       // Here, we choose the simple mode to do batch delete.
       deleteRequest.setQuiet(true);
       DeleteObjectsResult result = ossClient.deleteObjects(deleteRequest);
+      statistics.incrementWriteOps(1);
       deleteFailed = result.getDeletedObjects();
       tries++;
       if (tries == retry) {
@@ -267,11 +272,13 @@ public class AliyunOSSFileSystemStore {
    */
   public ObjectMetadata getObjectMetadata(String key) {
     try {
-      return ossClient.getObjectMetadata(bucketName, key);
-    } catch (OSSException osse) {
-      return null;
-    } finally {
+      ObjectMetadata objectMeta = ossClient.getObjectMetadata(bucketName, key);
       statistics.incrementReadOps(1);
+      return objectMeta;
+    } catch (OSSException osse) {
+      LOG.error("Exception thrown when get object meta: "
+              + key + ", exception: " + osse);
+      return null;
     }
   }
 
@@ -288,6 +295,7 @@ public class AliyunOSSFileSystemStore {
     dirMeta.setContentLength(0);
     try {
       ossClient.putObject(bucketName, key, in, dirMeta);
+      statistics.incrementWriteOps(1);
     } finally {
       in.close();
     }
@@ -303,6 +311,7 @@ public class AliyunOSSFileSystemStore {
   public boolean copyFile(String srcKey, String dstKey) {
     ObjectMetadata objectMeta =
         ossClient.getObjectMetadata(bucketName, srcKey);
+    statistics.incrementReadOps(1);
     long contentLength = objectMeta.getContentLength();
     if (contentLength <= multipartThreshold) {
       return singleCopy(srcKey, dstKey);
@@ -322,6 +331,7 @@ public class AliyunOSSFileSystemStore {
   private boolean singleCopy(String srcKey, String dstKey) {
     CopyObjectResult copyResult =
         ossClient.copyObject(bucketName, srcKey, bucketName, dstKey);
+    statistics.incrementWriteOps(1);
     LOG.debug(copyResult.getETag());
     return true;
   }
@@ -371,6 +381,7 @@ public class AliyunOSSFileSystemStore {
         UploadPartCopyResult partCopyResult =
             ossClient.uploadPartCopy(partCopyRequest);
         statistics.incrementWriteOps(1);
+        statistics.incrementBytesWritten(size);
         partETags.add(partCopyResult.getPartETag());
       }
       CompleteMultipartUploadRequest completeMultipartUploadRequest =
@@ -448,8 +459,12 @@ public class AliyunOSSFileSystemStore {
     try {
       GetObjectRequest request = new GetObjectRequest(bucketName, key);
       request.setRange(byteStart, byteEnd);
-      return ossClient.getObject(request).getObjectContent();
+      InputStream in = ossClient.getObject(request).getObjectContent();
+      statistics.incrementReadOps(1);
+      return in;
     } catch (OSSException | ClientException e) {
+      LOG.error("Exception thrown when store retrieves key: "
+              + key + ", exception: " + e);
       return null;
     }
   }
@@ -477,6 +492,7 @@ public class AliyunOSSFileSystemStore {
       for (OSSObjectSummary object : objects.getObjectSummaries()) {
         key = object.getKey();
         ossClient.deleteObject(bucketName, key);
+        statistics.incrementWriteOps(1);
       }
 
       for (String dir: objects.getCommonPrefixes()) {
@@ -558,9 +574,9 @@ public class AliyunOSSFileSystemStore {
           String key = summary.getKey();
           Path path = fs.makeQualified(new Path("/" + key));
           if (filter.accept(path) && acceptor.accept(path, summary)) {
-            FileStatus status = new FileStatus(summary.getSize(),
+            FileStatus status = new OSSFileStatus(summary.getSize(),
                 key.endsWith("/"), 1, fs.getDefaultBlockSize(path),
-                summary.getLastModified().getTime(), path);
+                summary.getLastModified().getTime(), path, username);
             stats.add(status);
           }
         }
@@ -568,7 +584,8 @@ public class AliyunOSSFileSystemStore {
         for (String commonPrefix : listing.getCommonPrefixes()) {
           Path path = fs.makeQualified(new Path("/" + commonPrefix));
           if (filter.accept(path) && acceptor.accept(path, commonPrefix)) {
-            FileStatus status = new FileStatus(0, true, 1, 0, 0, path);
+            FileStatus status = new OSSFileStatus(0, true, 1, 0, 0,
+                path, username);
             stats.add(status);
           }
         }
@@ -601,6 +618,7 @@ public class AliyunOSSFileSystemStore {
         uploadRequest.setPartSize(file.length());
         uploadRequest.setPartNumber(idx);
         UploadPartResult uploadResult = ossClient.uploadPart(uploadRequest);
+        statistics.incrementWriteOps(1);
         return uploadResult.getPartETag();
       } catch (Exception e) {
         LOG.debug("Failed to upload "+ file.getPath() +", " +

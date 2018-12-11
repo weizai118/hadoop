@@ -17,11 +17,14 @@
 package org.apache.hadoop.hdds.scm.container;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerInfo;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
-import org.apache.hadoop.hdds.scm.exceptions.SCMException;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.LifeCycleEvent;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.LifeCycleState;
+import org.apache.hadoop.hdds.scm.pipeline.PipelineManager;
+import org.apache.hadoop.hdds.scm.pipeline.PipelineNotFoundException;
 import org.apache.hadoop.hdds.server.events.EventHandler;
 import org.apache.hadoop.hdds.server.events.EventPublisher;
 import org.apache.hadoop.ozone.protocol.commands.CloseContainerCommand;
@@ -44,57 +47,67 @@ public class CloseContainerEventHandler implements EventHandler<ContainerID> {
   public static final Logger LOG =
       LoggerFactory.getLogger(CloseContainerEventHandler.class);
 
+  private final PipelineManager pipelineManager;
+  private final ContainerManager containerManager;
 
-  private final Mapping containerManager;
-
-  public CloseContainerEventHandler(Mapping containerManager) {
+  public CloseContainerEventHandler(final PipelineManager pipelineManager,
+      final ContainerManager containerManager) {
+    this.pipelineManager = pipelineManager;
     this.containerManager = containerManager;
   }
 
   @Override
   public void onMessage(ContainerID containerID, EventPublisher publisher) {
-
-    LOG.info("Close container Event triggered for container : {}",
-        containerID.getId());
-    ContainerWithPipeline containerWithPipeline = null;
-    ContainerInfo info;
+    LOG.info("Close container Event triggered for container : {}", containerID);
     try {
-      containerWithPipeline =
-          containerManager.getContainerWithPipeline(containerID.getId());
-      info = containerWithPipeline.getContainerInfo();
-      if (info == null) {
-        LOG.info("Failed to update the container state. Container with id : {} "
-            + "does not exist", containerID.getId());
-        return;
+      // If the container is in OPEN state, FINALIZE it.
+      if (containerManager.getContainer(containerID).getState()
+          == LifeCycleState.OPEN) {
+        containerManager.updateContainerState(
+            containerID, LifeCycleEvent.FINALIZE);
       }
-    } catch (IOException e) {
-      LOG.info("Failed to update the container state. Container with id : {} "
-          + "does not exist", containerID.getId());
-      return;
-    }
 
-    if (info.getState() == HddsProtos.LifeCycleState.OPEN) {
-      for (DatanodeDetails datanode :
-          containerWithPipeline.getPipeline().getMachines()) {
-        CommandForDatanode closeContainerCommand = new CommandForDatanode<>(
-            datanode.getUuid(),
-            new CloseContainerCommand(containerID.getId(),
-                info.getReplicationType()));
-        publisher.fireEvent(DATANODE_COMMAND, closeContainerCommand);
-      }
-      try {
-        // Finalize event will make sure the state of the container transitions
-        // from OPEN to CLOSING in containerStateManager.
-        containerManager.getStateManager()
-            .updateContainerState(info, HddsProtos.LifeCycleEvent.FINALIZE);
-      } catch (SCMException ex) {
-        LOG.error("Failed to update the container state for container : {}"
-            + containerID);
-      }
-    } else {
-      LOG.info("container with id : {} is in {} state and need not be closed.",
-          containerID.getId(), info.getState());
-    }
+      // ContainerInfo has to read again after the above state change.
+      final ContainerInfo container = containerManager
+          .getContainer(containerID);
+      // Send close command to datanodes, if the container is in CLOSING state
+      if (container.getState() == LifeCycleState.CLOSING) {
 
+        final CloseContainerCommand closeContainerCommand =
+            new CloseContainerCommand(
+                containerID.getId(), container.getPipelineID());
+
+        getNodes(container).forEach(node -> publisher.fireEvent(
+            DATANODE_COMMAND,
+            new CommandForDatanode<>(node.getUuid(), closeContainerCommand)));
+      } else {
+        LOG.warn("Cannot close container {}, which is in {} state.",
+            containerID, container.getState());
+      }
+
+    } catch (IOException ex) {
+      LOG.error("Failed to close the container {}.", containerID, ex);
+    }
   }
+
+  /**
+   * Returns the list of Datanodes where this container lives.
+   *
+   * @param container ContainerInfo
+   * @return list of DatanodeDetails
+   * @throws ContainerNotFoundException
+   */
+  private List<DatanodeDetails> getNodes(final ContainerInfo container)
+      throws ContainerNotFoundException {
+    try {
+      return pipelineManager.getPipeline(container.getPipelineID()).getNodes();
+    } catch (PipelineNotFoundException ex) {
+      // Use container replica if the pipeline is not available.
+      return containerManager.getContainerReplicas(container.containerID())
+          .stream()
+          .map(ContainerReplica::getDatanodeDetails)
+          .collect(Collectors.toList());
+    }
+  }
+
 }

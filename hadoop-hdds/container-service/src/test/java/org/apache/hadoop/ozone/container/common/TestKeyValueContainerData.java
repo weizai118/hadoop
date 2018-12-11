@@ -18,12 +18,14 @@
 
 package org.apache.hadoop.ozone.container.common;
 
+import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -31,7 +33,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class TestKeyValueContainerData {
 
-  private static final int MAXSIZE = 5;
+  private static final long MAXSIZE = (long) StorageUnit.GB.toBytes(5);
   @Test
   public void testKeyValueData() {
     long containerId = 1L;
@@ -39,16 +41,18 @@ public class TestKeyValueContainerData {
         .ContainerType.KeyValueContainer;
     String path = "/tmp";
     String containerDBType = "RocksDB";
-    ContainerProtos.ContainerLifeCycleState state = ContainerProtos
-        .ContainerLifeCycleState.CLOSED;
+    ContainerProtos.ContainerDataProto.State state =
+        ContainerProtos.ContainerDataProto.State.CLOSED;
     AtomicLong val = new AtomicLong(0);
+    UUID pipelineId = UUID.randomUUID();
+    UUID datanodeId = UUID.randomUUID();
 
     KeyValueContainerData kvData = new KeyValueContainerData(containerId,
-        MAXSIZE);
+        MAXSIZE, pipelineId.toString(), datanodeId.toString());
 
     assertEquals(containerType, kvData.getContainerType());
     assertEquals(containerId, kvData.getContainerID());
-    assertEquals(ContainerProtos.ContainerLifeCycleState.OPEN, kvData
+    assertEquals(ContainerProtos.ContainerDataProto.State.OPEN, kvData
         .getState());
     assertEquals(0, kvData.getMetadata().size());
     assertEquals(0, kvData.getNumPendingDeletionBlocks());
@@ -57,7 +61,8 @@ public class TestKeyValueContainerData {
     assertEquals(val.get(), kvData.getReadCount());
     assertEquals(val.get(), kvData.getWriteCount());
     assertEquals(val.get(), kvData.getKeyCount());
-    assertEquals(MAXSIZE, kvData.getMaxSizeGB());
+    assertEquals(val.get(), kvData.getNumPendingDeletionBlocks());
+    assertEquals(MAXSIZE, kvData.getMaxSize());
 
     kvData.setState(state);
     kvData.setContainerDBType(containerDBType);
@@ -68,6 +73,7 @@ public class TestKeyValueContainerData {
     kvData.incrReadCount();
     kvData.incrWriteCount();
     kvData.incrKeyCount();
+    kvData.incrPendingDeletionBlocks(1);
 
     assertEquals(state, kvData.getState());
     assertEquals(containerDBType, kvData.getContainerDBType());
@@ -79,7 +85,9 @@ public class TestKeyValueContainerData {
     assertEquals(1, kvData.getReadCount());
     assertEquals(1, kvData.getWriteCount());
     assertEquals(1, kvData.getKeyCount());
-
+    assertEquals(1, kvData.getNumPendingDeletionBlocks());
+    assertEquals(pipelineId.toString(), kvData.getOriginPipelineId());
+    assertEquals(datanodeId.toString(), kvData.getOriginNodeId());
   }
 
 }

@@ -18,23 +18,26 @@
 
 package org.apache.hadoop.ozone.container.common.interfaces;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Map;
+
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos
-    .ContainerLifeCycleState;
-import org.apache.hadoop.hdds.scm.container.common.helpers.
-    StorageContainerException;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerDatanodeProtocolProtos.ContainerReplicaProto;
+import org.apache.hadoop.hdds.scm.container.common.helpers
+    .StorageContainerException;
 
 import org.apache.hadoop.hdfs.util.RwLock;
 import org.apache.hadoop.ozone.container.common.impl.ContainerData;
 import org.apache.hadoop.ozone.container.common.volume.VolumeSet;
 
-import java.util.Map;
-
-
 /**
  * Interface for Container Operations.
  */
-public interface Container extends RwLock {
+public interface Container<CONTAINERDATA extends ContainerData> extends RwLock {
 
   /**
    * Creates a container.
@@ -66,21 +69,32 @@ public interface Container extends RwLock {
    * Get metadata about the container.
    *
    * @return ContainerData - Container Data.
-   * @throws StorageContainerException
    */
-  ContainerData getContainerData();
+  CONTAINERDATA getContainerData();
 
   /**
    * Get the Container Lifecycle state.
    *
    * @return ContainerLifeCycleState - Container State.
-   * @throws StorageContainerException
    */
-  ContainerLifeCycleState getContainerState();
+  ContainerProtos.ContainerDataProto.State getContainerState();
 
   /**
-   * Closes a open container, if it is already closed or does not exist a
+   * Marks the container for closing. Moves the container to CLOSING state.
+   */
+  void markContainerForClose() throws StorageContainerException;
+
+  /**
+   * Quasi Closes a open container, if it is already closed or does not exist a
    * StorageContainerException is thrown.
+   *
+   * @throws StorageContainerException
+   */
+  void quasiClose() throws StorageContainerException;
+
+  /**
+   * Closes a open/quasi closed container, if it is already closed or does not
+   * exist a StorageContainerException is thrown.
    *
    * @throws StorageContainerException
    */
@@ -92,9 +106,45 @@ public interface Container extends RwLock {
   ContainerProtos.ContainerType getContainerType();
 
   /**
+   * Returns containerFile.
+   */
+  File getContainerFile();
+
+  /**
    * updates the DeleteTransactionId.
    * @param deleteTransactionId
    */
   void updateDeleteTransactionId(long deleteTransactionId);
 
+  /**
+   * Returns blockIterator for the container.
+   * @return BlockIterator
+   * @throws IOException
+   */
+  BlockIterator blockIterator() throws IOException;
+
+  /**
+   * Import the container from an external archive.
+   */
+  void importContainerData(InputStream stream,
+      ContainerPacker<CONTAINERDATA> packer) throws IOException;
+
+  /**
+   * Export all the data of the container to one output archive with the help
+   * of the packer.
+   *
+   */
+  void exportContainerData(OutputStream stream,
+      ContainerPacker<CONTAINERDATA> packer) throws IOException;
+
+  /**
+   * Returns containerReport for the container.
+   */
+  ContainerReplicaProto getContainerReport()
+      throws StorageContainerException;
+
+  /**
+   * updates the blockCommitSequenceId.
+   */
+  void updateBlockCommitSequenceId(long blockCommitSequenceId);
 }

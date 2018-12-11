@@ -29,8 +29,8 @@ import java.util.Iterator;
 import java.util.Map;
 
 import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hdfs.protocol.ExtendedBlock;
@@ -58,7 +58,8 @@ import com.google.common.collect.Multiset;
 @InterfaceAudience.Private
 public class BlockTokenSecretManager extends
     SecretManager<BlockTokenIdentifier> {
-  public static final Log LOG = LogFactory.getLog(BlockTokenSecretManager.class);
+  public static final Logger LOG =
+      LoggerFactory.getLogger(BlockTokenSecretManager.class);
 
   public static final Token<BlockTokenIdentifier> DUMMY_TOKEN = new Token<BlockTokenIdentifier>();
 
@@ -219,7 +220,7 @@ public class BlockTokenSecretManager extends
   }
 
   /**
-   * Update block keys if update time > update interval.
+   * Update block keys if update time {@literal >} update interval.
    * @return true if the keys are updated.
    */
   public synchronized boolean updateKeys(final long updateTime) throws IOException {
@@ -291,6 +292,23 @@ public class BlockTokenSecretManager extends
     }
     if (ArrayUtils.isNotEmpty(storageIds)) {
       checkAccess(id.getStorageIds(), storageIds, "StorageIDs");
+    }
+  }
+
+  /**
+   * Check if access should be allowed. userID is not checked if null. This
+   * method doesn't check if token password is correct. It should be used only
+   * when token password has already been verified (e.g., in the RPC layer).
+   *
+   * Some places need to check the access using StorageTypes and for other
+   * places the StorageTypes is not relevant.
+   */
+  public void checkAccess(BlockTokenIdentifier id, String userId,
+      ExtendedBlock block, BlockTokenIdentifier.AccessMode mode,
+      StorageType[] storageTypes) throws InvalidToken {
+    checkAccess(id, userId, block, mode);
+    if (ArrayUtils.isNotEmpty(storageTypes)) {
+      checkAccess(id.getStorageTypes(), storageTypes, "StorageTypes");
     }
   }
 
@@ -366,6 +384,26 @@ public class BlockTokenSecretManager extends
               + ", block=" + block + ", access mode=" + mode);
     }
     checkAccess(id, userId, block, mode, storageTypes, storageIds);
+    if (!Arrays.equals(retrievePassword(id), token.getPassword())) {
+      throw new InvalidToken("Block token with " + id
+          + " doesn't have the correct token password");
+    }
+  }
+
+  /** Check if access should be allowed. userID is not checked if null */
+  public void checkAccess(Token<BlockTokenIdentifier> token, String userId,
+      ExtendedBlock block, BlockTokenIdentifier.AccessMode mode)
+      throws InvalidToken {
+    BlockTokenIdentifier id = new BlockTokenIdentifier();
+    try {
+      id.readFields(new DataInputStream(new ByteArrayInputStream(token
+          .getIdentifier())));
+    } catch (IOException e) {
+      throw new InvalidToken(
+          "Unable to de-serialize block token identifier for user=" + userId
+              + ", block=" + block + ", access mode=" + mode);
+    }
+    checkAccess(id, userId, block, mode);
     if (!Arrays.equals(retrievePassword(id), token.getPassword())) {
       throw new InvalidToken("Block token with " + id
           + " doesn't have the correct token password");

@@ -64,7 +64,7 @@ public class ContainerReportPublisher extends
           getConf());
 
       Preconditions.checkState(
-          heartbeatFrequency < containerReportInterval,
+          heartbeatFrequency <= containerReportInterval,
           HDDS_CONTAINER_REPORT_INTERVAL +
               " cannot be configured lower than heartbeat frequency.");
     }
@@ -80,6 +80,7 @@ public class ContainerReportPublisher extends
 
   @Override
   protected ContainerReportsProto getReport() throws IOException {
-    return getContext().getParent().getContainer().getContainerReport();
+    return getContext().getParent().getContainer()
+        .getController().getContainerReport();
   }
 }

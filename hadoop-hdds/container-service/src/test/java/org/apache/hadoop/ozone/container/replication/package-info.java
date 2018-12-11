@@ -17,7 +17,6 @@
  *
  */
 /**
- * SCM Testing and Mocking Utils.
+ * Tests for the container replication.
  */
 package org.apache.hadoop.ozone.container.replication;
-// Test classes for Replication functionality.

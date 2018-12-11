@@ -21,8 +21,10 @@ package org.apache.hadoop.utils;
 import com.google.common.base.Preconditions;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.hadoop.hdds.HddsUtils;
 import org.apache.hadoop.metrics2.util.MBeans;
-import org.apache.ratis.shaded.com.google.common.annotations.VisibleForTesting;
+import org.apache.ratis.thirdparty.com.google.common.annotations.
+    VisibleForTesting;
 import org.rocksdb.DbPath;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
@@ -71,7 +73,8 @@ public class RocksDBStore implements MetadataStore {
 
         Map<String, String> jmxProperties = new HashMap<String, String>();
         jmxProperties.put("dbName", dbFile.getName());
-        statMBeanName = MBeans.register("Ozone", "RocksDbStore", jmxProperties,
+        statMBeanName = HddsUtils.registerWithJmxProperties(
+            "Ozone", "RocksDbStore", jmxProperties,
             new RocksDBStoreMBean(dbOptions.statistics()));
         if (statMBeanName == null) {
           LOG.warn("jmx registration failed during RocksDB init, db path :{}",
@@ -94,7 +97,7 @@ public class RocksDBStore implements MetadataStore {
     }
   }
 
-  private IOException toIOException(String msg, RocksDBException e) {
+  public static IOException toIOException(String msg, RocksDBException e) {
     String statusCode = e.getStatus() == null ? "N/A" :
         e.getStatus().getCodeString();
     String errMessage = e.getMessage() == null ? "Unknown error" :
@@ -247,7 +250,7 @@ public class RocksDBStore implements MetadataStore {
         for (BatchOperation.SingleOperation opt : operations) {
           switch (opt.getOpt()) {
           case DELETE:
-            writeBatch.remove(opt.getKey());
+            writeBatch.delete(opt.getKey());
             break;
           case PUT:
             writeBatch.put(opt.getKey(), opt.getValue());
@@ -378,6 +381,11 @@ public class RocksDBStore implements MetadataStore {
   @VisibleForTesting
   protected ObjectName getStatMBeanName() {
     return statMBeanName;
+  }
+
+  @Override
+  public MetaStoreIterator<KeyValue> iterator() {
+    return new RocksDBStoreIterator(db.newIterator());
   }
 
 }

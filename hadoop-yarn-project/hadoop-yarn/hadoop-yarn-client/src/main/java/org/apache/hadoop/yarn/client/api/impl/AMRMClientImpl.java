@@ -99,6 +99,7 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
   protected String appHostName;
   protected int appHostPort;
   protected String appTrackingUrl;
+  protected String newTrackingUrl;
 
   protected ApplicationMasterProtocol rmClient;
   protected Resource clusterAvailableResources;
@@ -308,6 +309,11 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
             .releaseList(releaseList).updateRequests(updateList)
             .schedulingRequests(schedulingRequestList).build();
 
+        if (this.newTrackingUrl != null) {
+          allocateRequest.setTrackingUrl(this.newTrackingUrl);
+          this.appTrackingUrl = this.newTrackingUrl;
+          this.newTrackingUrl = null;
+        }
         // clear blacklistAdditions and blacklistRemovals before
         // unsynchronized part
         blacklistAdditions.clear();
@@ -1008,6 +1014,11 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
     }
   }
 
+  @Override
+  public synchronized void updateTrackingUrl(String trackingUrl) {
+    this.newTrackingUrl = trackingUrl;
+  }
+
   private void updateAMRMToken(Token token) throws IOException {
     org.apache.hadoop.security.token.Token<AMRMTokenIdentifier> amrmToken =
         new org.apache.hadoop.security.token.Token<AMRMTokenIdentifier>(token
@@ -1024,6 +1035,11 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
   @VisibleForTesting
   RemoteRequestsTable<T> getTable(long allocationRequestId) {
     return remoteRequests.get(Long.valueOf(allocationRequestId));
+  }
+
+  @VisibleForTesting
+  Map<Set<String>, List<SchedulingRequest>> getOutstandingSchedRequests() {
+    return outstandingSchedRequests;
   }
 
   RemoteRequestsTable<T> putTable(long allocationRequestId,

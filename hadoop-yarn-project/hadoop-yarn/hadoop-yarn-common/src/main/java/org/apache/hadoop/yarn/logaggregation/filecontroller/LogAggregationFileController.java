@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hadoop.classification.InterfaceAudience.Private;
+import org.apache.hadoop.classification.InterfaceAudience.Public;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -43,11 +43,14 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.io.IOUtils;
+import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.token.SecretManager;
 import org.apache.hadoop.yarn.api.records.ApplicationAccessType;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
+import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
 import org.apache.hadoop.yarn.logaggregation.LogAggregationUtils;
 import org.apache.hadoop.yarn.webapp.View.ViewContext;
@@ -62,7 +65,7 @@ import org.apache.hadoop.yarn.logaggregation.ContainerLogsRequest;
 /**
  * Base class to implement Log Aggregation File Controller.
  */
-@Private
+@Public
 @Unstable
 public abstract class LogAggregationFileController {
 
@@ -106,6 +109,8 @@ public abstract class LogAggregationFileController {
   protected int retentionSize;
   protected String fileControllerName;
 
+  protected boolean fsSupportsChmod = true;
+
   public LogAggregationFileController() {}
 
   /**
@@ -115,16 +120,16 @@ public abstract class LogAggregationFileController {
    */
   public void initialize(Configuration conf, String controllerName) {
     this.conf = conf;
-    int configuredRentionSize = conf.getInt(
+    int configuredRetentionSize = conf.getInt(
         YarnConfiguration.NM_LOG_AGGREGATION_NUM_LOG_FILES_SIZE_PER_APP,
         YarnConfiguration
             .DEFAULT_NM_LOG_AGGREGATION_NUM_LOG_FILES_SIZE_PER_APP);
-    if (configuredRentionSize <= 0) {
+    if (configuredRetentionSize <= 0) {
       this.retentionSize =
           YarnConfiguration
               .DEFAULT_NM_LOG_AGGREGATION_NUM_LOG_FILES_SIZE_PER_APP;
     } else {
-      this.retentionSize = configuredRentionSize;
+      this.retentionSize = configuredRetentionSize;
     }
     this.fileControllerName = controllerName;
     initInternal(conf);
@@ -247,7 +252,6 @@ public abstract class LogAggregationFileController {
    * Verify and create the remote log directory.
    */
   public void verifyAndCreateRemoteLogDir() {
-    boolean logPermError = true;
     // Checking the existence of the TLD
     FileSystem remoteFS = null;
     try {
@@ -261,14 +265,12 @@ public abstract class LogAggregationFileController {
     try {
       FsPermission perms =
           remoteFS.getFileStatus(remoteRootLogDir).getPermission();
-      if (!perms.equals(TLDIR_PERMISSIONS) && logPermError) {
+      if (!perms.equals(TLDIR_PERMISSIONS)) {
         LOG.warn("Remote Root Log Dir [" + remoteRootLogDir
             + "] already exist, but with incorrect permissions. "
             + "Expected: [" + TLDIR_PERMISSIONS + "], Found: [" + perms
             + "]." + " The cluster may have problems with multiple users.");
-        logPermError = false;
-      } else {
-        logPermError = true;
+
       }
     } catch (FileNotFoundException e) {
       remoteExists = false;
@@ -277,15 +279,26 @@ public abstract class LogAggregationFileController {
           "Failed to check permissions for dir ["
               + remoteRootLogDir + "]", e);
     }
+
+    Path qualified =
+        remoteRootLogDir.makeQualified(remoteFS.getUri(),
+            remoteFS.getWorkingDirectory());
     if (!remoteExists) {
       LOG.warn("Remote Root Log Dir [" + remoteRootLogDir
           + "] does not exist. Attempting to create it.");
       try {
-        Path qualified =
-            remoteRootLogDir.makeQualified(remoteFS.getUri(),
-                remoteFS.getWorkingDirectory());
         remoteFS.mkdirs(qualified, new FsPermission(TLDIR_PERMISSIONS));
-        remoteFS.setPermission(qualified, new FsPermission(TLDIR_PERMISSIONS));
+
+        // Not possible to query FileSystem API to check if it supports
+        // chmod, chown etc. Hence resorting to catching exceptions here.
+        // Remove when FS APi is ready
+        try {
+          remoteFS.setPermission(qualified, new FsPermission(TLDIR_PERMISSIONS));
+        } catch ( UnsupportedOperationException use) {
+          LOG.info("Unable to set permissions for configured filesystem since"
+              + " it does not support this", remoteFS.getScheme());
+          fsSupportsChmod = false;
+        }
 
         UserGroupInformation loginUser = UserGroupInformation.getLoginUser();
         String primaryGroupName = null;
@@ -298,12 +311,30 @@ public abstract class LogAggregationFileController {
         }
         // set owner on the remote directory only if the primary group exists
         if (primaryGroupName != null) {
-          remoteFS.setOwner(qualified,
-              loginUser.getShortUserName(), primaryGroupName);
+          try {
+            remoteFS.setOwner(qualified, loginUser.getShortUserName(),
+                primaryGroupName);
+          } catch (UnsupportedOperationException use) {
+            LOG.info(
+                "File System does not support setting user/group" + remoteFS
+                    .getScheme(), use);
+          }
         }
       } catch (IOException e) {
         throw new YarnRuntimeException("Failed to create remoteLogDir ["
             + remoteRootLogDir + "]", e);
+      }
+    } else{
+      //Check if FS has capability to set/modify permissions
+      try {
+        remoteFS.setPermission(qualified, new FsPermission(TLDIR_PERMISSIONS));
+      } catch (UnsupportedOperationException use) {
+        LOG.info("Unable to set permissions for configured filesystem since"
+            + " it does not support this", remoteFS.getScheme());
+        fsSupportsChmod = false;
+      } catch (IOException e) {
+        LOG.warn("Failed to check if FileSystem suppports permissions on "
+            + "remoteLogDir [" + remoteRootLogDir + "]", e);
       }
     }
   }
@@ -365,6 +396,10 @@ public abstract class LogAggregationFileController {
         }
       });
     } catch (Exception e) {
+      if (e instanceof RemoteException) {
+        throw new YarnRuntimeException(((RemoteException) e)
+            .unwrapRemoteException(SecretManager.InvalidToken.class));
+      }
       throw new YarnRuntimeException(e);
     }
   }
@@ -376,11 +411,16 @@ public abstract class LogAggregationFileController {
 
   protected void createDir(FileSystem fs, Path path, FsPermission fsPerm)
       throws IOException {
-    FsPermission dirPerm = new FsPermission(fsPerm);
-    fs.mkdirs(path, dirPerm);
-    FsPermission umask = FsPermission.getUMask(fs.getConf());
-    if (!dirPerm.equals(dirPerm.applyUMask(umask))) {
-      fs.setPermission(path, new FsPermission(fsPerm));
+
+    if (fsSupportsChmod) {
+      FsPermission dirPerm = new FsPermission(fsPerm);
+      fs.mkdirs(path, dirPerm);
+      FsPermission umask = FsPermission.getUMask(fs.getConf());
+      if (!dirPerm.equals(dirPerm.applyUMask(umask))) {
+        fs.setPermission(path, new FsPermission(fsPerm));
+      }
+    } else {
+      fs.mkdirs(path);
     }
   }
 
@@ -389,8 +429,10 @@ public abstract class LogAggregationFileController {
     boolean exists = true;
     try {
       FileStatus appDirStatus = fs.getFileStatus(path);
-      if (!APP_DIR_PERMISSIONS.equals(appDirStatus.getPermission())) {
-        fs.setPermission(path, APP_DIR_PERMISSIONS);
+      if (fsSupportsChmod) {
+        if (!APP_DIR_PERMISSIONS.equals(appDirStatus.getPermission())) {
+          fs.setPermission(path, APP_DIR_PERMISSIONS);
+        }
       }
     } catch (FileNotFoundException fnfe) {
       exists = false;
@@ -495,4 +537,7 @@ public abstract class LogAggregationFileController {
     return sb.toString();
   }
 
+  public boolean isFsSupportsChmod() {
+    return fsSupportsChmod;
+  }
 }

@@ -19,8 +19,7 @@
 package org.apache.hadoop.hdds.scm;
 
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.hadoop.hdds.scm.container.common.helpers.Pipeline;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos
     .ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos
@@ -29,9 +28,8 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -97,8 +95,17 @@ public abstract class XceiverClientSpi implements Closeable {
    * @return Response to the command
    * @throws IOException
    */
-  public abstract ContainerCommandResponseProto sendCommand(
-      ContainerCommandRequestProto request) throws IOException;
+  public ContainerCommandResponseProto sendCommand(
+      ContainerCommandRequestProto request) throws IOException {
+    try {
+      XceiverClientAsyncReply reply;
+      reply = sendCommandAsync(request);
+      ContainerCommandResponseProto responseProto = reply.getResponse().get();
+      return responseProto;
+    } catch (ExecutionException | InterruptedException e) {
+      throw new IOException("Failed to command " + request, e);
+    }
+  }
 
   /**
    * Sends a given command to server gets a waitable future back.
@@ -107,18 +114,9 @@ public abstract class XceiverClientSpi implements Closeable {
    * @return Response to the command
    * @throws IOException
    */
-  public abstract CompletableFuture<ContainerCommandResponseProto>
+  public abstract XceiverClientAsyncReply
       sendCommandAsync(ContainerCommandRequestProto request)
       throws IOException, ExecutionException, InterruptedException;
-
-  /**
-   * Create a pipeline.
-   *
-   * @param pipelineID - Name of the pipeline.
-   * @param datanodes - Datanodes
-   */
-  public abstract void createPipeline(String pipelineID,
-      List<DatanodeDetails> datanodes) throws IOException;
 
   /**
    * Returns pipeline Type.
@@ -126,4 +124,25 @@ public abstract class XceiverClientSpi implements Closeable {
    * @return - {Stand_Alone, Ratis or Chained}
    */
   public abstract HddsProtos.ReplicationType getPipelineType();
+
+  /**
+   * Check if an specfic commitIndex is replicated to majority/all servers.
+   * @param index index to watch for
+   * @param timeout timeout provided for the watch ipeartion to complete
+   * @return the min commit index replicated to all or majority servers
+   *         in case of a failure
+   * @throws InterruptedException
+   * @throws ExecutionException
+   * @throws TimeoutException
+   * @throws IOException
+   */
+  public abstract long watchForCommit(long index, long timeout)
+      throws InterruptedException, ExecutionException, TimeoutException,
+      IOException;
+
+  /**
+   * returns the min commit index replicated to all servers.
+   * @return min commit index replicated to all servers.
+   */
+  public abstract long getReplicatedMinCommitIndex();
 }

@@ -18,8 +18,8 @@
 
 package org.apache.hadoop.tools.mapred;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -47,7 +47,7 @@ import static org.apache.hadoop.fs.contract.ContractTestUtils.*;
 import static org.apache.hadoop.tools.util.TestDistCpUtils.*;
 
 public class TestCopyCommitter {
-  private static final Log LOG = LogFactory.getLog(TestCopyCommitter.class);
+  private static final Logger LOG = LoggerFactory.getLogger(TestCopyCommitter.class);
 
   private static final Random rand = new Random();
 
@@ -85,10 +85,6 @@ public class TestCopyCommitter {
   @Before
   public void createMetaFolder() throws IOException {
     config.set(DistCpConstants.CONF_LABEL_META_FOLDER, "/meta");
-    // Unset listing file path since the config is shared by
-    // multiple tests, and some test doesn't set it, such as
-    // testNoCommitAction, but the distcp code will check it.
-    config.set(DistCpConstants.CONF_LABEL_LISTING_FILE_PATH, "");
     Path meta = new Path("/meta");
     cluster.getFileSystem().mkdirs(meta);
   }

@@ -26,6 +26,7 @@ import org.apache.hadoop.hdds.HddsUtils;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdfs.DFSUtil;
+import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.apache.hadoop.ozone.container.common.helpers.ContainerUtils;
 import org.apache.hadoop.ozone.container.common.statemachine
     .DatanodeStateMachine;
@@ -231,7 +232,8 @@ public class HddsDatanodeService implements ServicePlugin {
 
   public static void main(String[] args) {
     try {
-      if (DFSUtil.parseHelpArgument(args, "Starts HDDS Datanode", System.out, false)) {
+      if (DFSUtil.parseHelpArgument(
+          args, "Starts HDDS Datanode", System.out, false)) {
         System.exit(0);
       }
       Configuration conf = new OzoneConfiguration();
@@ -241,6 +243,7 @@ public class HddsDatanodeService implements ServicePlugin {
         System.exit(1);
       }
       StringUtils.startupShutdownMessage(HddsDatanodeService.class, args, LOG);
+      DefaultMetricsSystem.initialize("HddsDatanode");
       HddsDatanodeService hddsDatanodeService =
           createHddsDatanodeService(conf);
       hddsDatanodeService.start(null);

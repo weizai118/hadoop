@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.ozone.om.protocolPB;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.protobuf.RpcController;
@@ -29,6 +30,7 @@ import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
+import org.apache.hadoop.ozone.om.helpers.OmMultipartInfo;
 import org.apache.hadoop.ozone.om.helpers.OmVolumeArgs;
 import org.apache.hadoop.ozone.om.helpers.OpenKeySession;
 import org.apache.hadoop.ozone.om.helpers.ServiceInfo;
@@ -69,6 +71,10 @@ import org.apache.hadoop.ozone.protocol.proto
     .OzoneManagerProtocolProtos.LocateKeyRequest;
 import org.apache.hadoop.ozone.protocol.proto
     .OzoneManagerProtocolProtos.LocateKeyResponse;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos
+    .MultipartInfoInitiateRequest;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos
+    .MultipartInfoInitiateResponse;
 import org.apache.hadoop.ozone.protocol.proto
     .OzoneManagerProtocolProtos.RenameKeyRequest;
 import org.apache.hadoop.ozone.protocol.proto
@@ -113,6 +119,25 @@ import org.apache.hadoop.ozone.protocol.proto
     .OzoneManagerProtocolProtos.ServiceListRequest;
 import org.apache.hadoop.ozone.protocol.proto
     .OzoneManagerProtocolProtos.ServiceListResponse;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3BucketRequest;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3BucketResponse;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3DeleteBucketRequest;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3DeleteBucketResponse;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3BucketInfoRequest;
+import org.apache.hadoop.ozone.protocol.proto
+    .OzoneManagerProtocolProtos.S3BucketInfoResponse;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos
+    .S3ListBucketsRequest;
+import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos
+    .S3ListBucketsResponse;
+
+
+
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -487,7 +512,7 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
    */
   @Override
   public List<OmBucketInfo> listBuckets(String volumeName,
-                                        String startKey, String prefix, int count) throws IOException {
+      String startKey, String prefix, int count) throws IOException {
     List<OmBucketInfo> buckets = new ArrayList<>();
     ListBucketsRequest.Builder reqBuilder = ListBucketsRequest.newBuilder();
     reqBuilder.setVolumeName(volumeName);
@@ -553,7 +578,7 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
   }
 
   @Override
-  public OmKeyLocationInfo allocateBlock(OmKeyArgs args, int clientID)
+  public OmKeyLocationInfo allocateBlock(OmKeyArgs args, long clientID)
       throws IOException {
     AllocateBlockRequest.Builder req = AllocateBlockRequest.newBuilder();
     KeyArgs keyArgs = KeyArgs.newBuilder()
@@ -578,14 +603,19 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
   }
 
   @Override
-  public void commitKey(OmKeyArgs args, int clientID)
+  public void commitKey(OmKeyArgs args, long clientID)
       throws IOException {
     CommitKeyRequest.Builder req = CommitKeyRequest.newBuilder();
+    List<OmKeyLocationInfo> locationInfoList = args.getLocationInfoList();
+    Preconditions.checkNotNull(locationInfoList);
     KeyArgs keyArgs = KeyArgs.newBuilder()
         .setVolumeName(args.getVolumeName())
         .setBucketName(args.getBucketName())
         .setKeyName(args.getKeyName())
-        .setDataSize(args.getDataSize()).build();
+        .setDataSize(args.getDataSize())
+        .addAllKeyLocations(
+            locationInfoList.stream().map(OmKeyLocationInfo::getProtobuf)
+                .collect(Collectors.toList())).build();
     req.setKeyArgs(keyArgs);
     req.setClientID(clientID);
 
@@ -702,7 +732,7 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
    */
   @Override
   public List<OmKeyInfo> listKeys(String volumeName, String bucketName,
-                                  String startKey, String prefix, int maxKeys) throws IOException {
+      String startKey, String prefix, int maxKeys) throws IOException {
     List<OmKeyInfo> keys = new ArrayList<>();
     ListKeysRequest.Builder reqBuilder = ListKeysRequest.newBuilder();
     reqBuilder.setVolumeName(volumeName);
@@ -757,6 +787,99 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
     }
   }
 
+  @Override
+  public void createS3Bucket(String userName, String s3BucketName)
+      throws IOException {
+    S3BucketRequest request  = S3BucketRequest.newBuilder()
+        .setUserName(userName)
+        .setS3Bucketname(s3BucketName)
+        .build();
+    final S3BucketResponse resp;
+    try {
+      resp = rpcProxy.createS3Bucket(NULL_RPC_CONTROLLER, request);
+    } catch (ServiceException e) {
+      throw ProtobufHelper.getRemoteException(e);
+    }
+
+    if(resp.getStatus() != Status.OK) {
+      throw new IOException("Creating S3 bucket failed, error: "
+          + resp.getStatus());
+    }
+
+  }
+
+  @Override
+  public void deleteS3Bucket(String s3BucketName) throws IOException {
+    S3DeleteBucketRequest request  = S3DeleteBucketRequest.newBuilder()
+        .setS3BucketName(s3BucketName)
+        .build();
+    final S3DeleteBucketResponse resp;
+    try {
+      resp = rpcProxy.deleteS3Bucket(NULL_RPC_CONTROLLER, request);
+    } catch (ServiceException e) {
+      throw ProtobufHelper.getRemoteException(e);
+    }
+
+    if(resp.getStatus() != Status.OK) {
+      throw new IOException("Creating S3 bucket failed, error: "
+          + resp.getStatus());
+    }
+
+  }
+
+  @Override
+  public String getOzoneBucketMapping(String s3BucketName)
+      throws IOException {
+    S3BucketInfoRequest request  = S3BucketInfoRequest.newBuilder()
+        .setS3BucketName(s3BucketName)
+        .build();
+    final  S3BucketInfoResponse resp;
+    try {
+      resp = rpcProxy.getS3Bucketinfo(NULL_RPC_CONTROLLER, request);
+    } catch (ServiceException e) {
+      throw ProtobufHelper.getRemoteException(e);
+    }
+    if(resp.getStatus() != Status.OK) {
+      throw new IOException("GetOzoneBucketMapping failed, error:" + resp
+          .getStatus());
+    }
+    return resp.getOzoneMapping();
+  }
+
+  @Override
+  public List<OmBucketInfo> listS3Buckets(String userName, String startKey,
+                                          String prefix, int count)
+      throws IOException {
+    List<OmBucketInfo> buckets = new ArrayList<>();
+    S3ListBucketsRequest.Builder reqBuilder = S3ListBucketsRequest.newBuilder();
+    reqBuilder.setUserName(userName);
+    reqBuilder.setCount(count);
+    if (startKey != null) {
+      reqBuilder.setStartKey(startKey);
+    }
+    if (prefix != null) {
+      reqBuilder.setPrefix(prefix);
+    }
+    S3ListBucketsRequest request = reqBuilder.build();
+    final S3ListBucketsResponse resp;
+    try {
+      resp = rpcProxy.listS3Buckets(NULL_RPC_CONTROLLER, request);
+    } catch (ServiceException e) {
+      throw ProtobufHelper.getRemoteException(e);
+    }
+
+    if (resp.getStatus() == Status.OK) {
+      buckets.addAll(
+          resp.getBucketInfoList().stream()
+              .map(OmBucketInfo::getFromProtobuf)
+              .collect(Collectors.toList()));
+      return buckets;
+    } else {
+      throw new IOException("List S3 Buckets failed, error: "
+          + resp.getStatus());
+    }
+  }
+
   /**
    * Return the proxy object underlying this protocol translator.
    *
@@ -765,5 +888,35 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
   @Override
   public Object getUnderlyingProxyObject() {
     return null;
+  }
+
+  @Override
+  public OmMultipartInfo initiateMultipartUpload(OmKeyArgs omKeyArgs) throws
+      IOException {
+
+    MultipartInfoInitiateRequest.Builder multipartInfoInitiateRequest =
+        MultipartInfoInitiateRequest.newBuilder();
+
+    KeyArgs.Builder keyArgs = KeyArgs.newBuilder()
+        .setVolumeName(omKeyArgs.getVolumeName())
+        .setBucketName(omKeyArgs.getBucketName())
+        .setKeyName(omKeyArgs.getKeyName())
+        .setFactor(omKeyArgs.getFactor())
+        .setType(omKeyArgs.getType());
+    multipartInfoInitiateRequest.setKeyArgs(keyArgs.build());
+
+    MultipartInfoInitiateResponse resp;
+    try {
+      resp = rpcProxy.initiateMultiPartUpload(NULL_RPC_CONTROLLER,
+          multipartInfoInitiateRequest.build());
+    } catch (ServiceException e) {
+      throw ProtobufHelper.getRemoteException(e);
+    }
+    if (resp.getStatus() != Status.OK) {
+      throw new IOException("Initiate Multipart upload failed, error:" + resp
+          .getStatus());
+    }
+    return new OmMultipartInfo(resp.getVolumeName(), resp.getBucketName(), resp
+        .getKeyName(), resp.getMultipartUploadID());
   }
 }

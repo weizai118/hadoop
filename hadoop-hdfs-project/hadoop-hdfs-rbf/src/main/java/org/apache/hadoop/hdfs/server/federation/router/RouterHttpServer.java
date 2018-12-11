@@ -27,6 +27,8 @@ import org.apache.hadoop.hdfs.server.namenode.NameNodeHttpServer;
 import org.apache.hadoop.http.HttpServer2;
 import org.apache.hadoop.service.AbstractService;
 
+import javax.servlet.ServletContext;
+
 /**
  * Web interface for the {@link Router}. It exposes the Web UI and the WebHDFS
  * methods from {@link RouterWebHdfsMethods}.
@@ -87,8 +89,8 @@ public class RouterHttpServer extends AbstractService {
 
     this.httpServer = builder.build();
 
-    NameNodeHttpServer.initWebHdfs(conf, httpAddress.getHostName(), httpServer,
-        RouterWebHdfsMethods.class.getPackage().getName());
+    NameNodeHttpServer.initWebHdfs(conf, httpAddress.getHostName(), null,
+        httpServer, RouterWebHdfsMethods.class.getPackage().getName());
 
     this.httpServer.setAttribute(NAMENODE_ATTRIBUTE_KEY, this.router);
     this.httpServer.setAttribute(JspHelper.CURRENT_CONF, this.conf);
@@ -116,6 +118,9 @@ public class RouterHttpServer extends AbstractService {
   private static void setupServlets(
       HttpServer2 httpServer, Configuration conf) {
     // TODO Add servlets for FSCK, etc
+    httpServer.addInternalServlet(IsRouterActiveServlet.SERVLET_NAME,
+        IsRouterActiveServlet.PATH_SPEC,
+        IsRouterActiveServlet.class);
   }
 
   public InetSocketAddress getHttpAddress() {
@@ -124,5 +129,9 @@ public class RouterHttpServer extends AbstractService {
 
   public InetSocketAddress getHttpsAddress() {
     return this.httpsAddress;
+  }
+
+  public static Router getRouterFromContext(ServletContext context) {
+    return (Router)context.getAttribute(NAMENODE_ATTRIBUTE_KEY);
   }
 }

@@ -19,23 +19,30 @@
 package org.apache.hadoop.ozone.container.ozoneimpl;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos;
-import org.apache.hadoop.hdds.scm.ScmConfigKeys;
+import org.apache.hadoop.hdds.protocol.datanode.proto
+    .ContainerProtos.ContainerType;
+import org.apache.hadoop.hdds.protocol.proto
+    .StorageContainerDatanodeProtocolProtos;
+import org.apache.hadoop.hdds.protocol.proto
+        .StorageContainerDatanodeProtocolProtos.PipelineReportsProto;
+import org.apache.hadoop.ozone.container.common.helpers.ContainerMetrics;
 import org.apache.hadoop.ozone.container.common.impl.ContainerSet;
 import org.apache.hadoop.ozone.container.common.impl.HddsDispatcher;
 import org.apache.hadoop.ozone.container.common.interfaces.ContainerDispatcher;
-import org.apache.hadoop.ozone.container.common.transport.server.XceiverServer;
+import org.apache.hadoop.ozone.container.common.interfaces.Handler;
+import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
 import org.apache.hadoop.ozone.container.common.transport.server.XceiverServerGrpc;
 import org.apache.hadoop.ozone.container.common.transport.server.XceiverServerSpi;
 import org.apache.hadoop.ozone.container.common.transport.server.ratis.XceiverServerRatis;
 import org.apache.hadoop.ozone.container.common.volume.HddsVolume;
 import org.apache.hadoop.ozone.container.common.volume.VolumeSet;
 
+import org.apache.hadoop.ozone.container.replication.GrpcReplicationService;
+import org.apache.hadoop.ozone.container.replication
+    .OnDemandContainerReplicationSource;
 import org.apache.hadoop.util.DiskChecker.DiskOutOfSpaceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,24 +50,25 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Iterator;
-
-import static org.apache.hadoop.ozone.OzoneConsts.INVALID_PORT;
+import java.util.Map;
 
 /**
- * Ozone main class sets up the network server and initializes the container
+ * Ozone main class sets up the network servers and initializes the container
  * layer.
  */
 public class OzoneContainer {
 
-  public static final Logger LOG = LoggerFactory.getLogger(
+  private static final Logger LOG = LoggerFactory.getLogger(
       OzoneContainer.class);
 
   private final HddsDispatcher hddsDispatcher;
-  private final DatanodeDetails dnDetails;
+  private final Map<ContainerType, Handler> handlers;
   private final OzoneConfiguration config;
   private final VolumeSet volumeSet;
   private final ContainerSet containerSet;
-  private final XceiverServerSpi[] server;
+  private final XceiverServerSpi writeChannel;
+  private final XceiverServerSpi readChannel;
+  private final ContainerController controller;
 
   /**
    * Construct OzoneContainer object.
@@ -70,33 +78,43 @@ public class OzoneContainer {
    * @throws IOException
    */
   public OzoneContainer(DatanodeDetails datanodeDetails, OzoneConfiguration
-      conf) throws IOException {
-    this.dnDetails = datanodeDetails;
+      conf, StateContext context) throws IOException {
     this.config = conf;
     this.volumeSet = new VolumeSet(datanodeDetails.getUuidString(), conf);
     this.containerSet = new ContainerSet();
-    boolean useGrpc = this.config.getBoolean(
-        ScmConfigKeys.DFS_CONTAINER_GRPC_ENABLED_KEY,
-        ScmConfigKeys.DFS_CONTAINER_GRPC_ENABLED_DEFAULT);
     buildContainerSet();
-    hddsDispatcher = new HddsDispatcher(config, containerSet, volumeSet);
-    server = new XceiverServerSpi[]{
-        useGrpc ? new XceiverServerGrpc(datanodeDetails, this.config, this
-            .hddsDispatcher) :
-            new XceiverServer(datanodeDetails,
-                this.config, this.hddsDispatcher),
-        XceiverServerRatis.newXceiverServerRatis(datanodeDetails, this
-            .config, hddsDispatcher)
-    };
+    final ContainerMetrics metrics = ContainerMetrics.create(conf);
+    this.handlers = Maps.newHashMap();
+    for (ContainerType containerType : ContainerType.values()) {
+      handlers.put(containerType,
+          Handler.getHandlerForContainerType(
+              containerType, conf, context, containerSet, volumeSet, metrics));
+    }
+    this.hddsDispatcher = new HddsDispatcher(config, containerSet, volumeSet,
+        handlers, context, metrics);
 
+    /*
+     * ContainerController is the control plane
+     * XceiverServerRatis is the write channel
+     * XceiverServerGrpc is the read channel
+     */
+    this.controller = new ContainerController(containerSet, handlers);
+    this.writeChannel = XceiverServerRatis.newXceiverServerRatis(
+        datanodeDetails, config, hddsDispatcher, context);
+    this.readChannel = new XceiverServerGrpc(
+        datanodeDetails, config, hddsDispatcher, createReplicationService());
 
   }
 
+  private GrpcReplicationService createReplicationService() {
+    return new GrpcReplicationService(
+        new OnDemandContainerReplicationSource(controller));
+  }
 
   /**
    * Build's container map.
    */
-  public void buildContainerSet() {
+  private void buildContainerSet() {
     Iterator<HddsVolume> volumeSetIterator = volumeSet.getVolumesList()
         .iterator();
     ArrayList<Thread> volumeThreads = new ArrayList<Thread>();
@@ -105,7 +123,6 @@ public class OzoneContainer {
     // And also handle disk failure tolerance need to be added
     while (volumeSetIterator.hasNext()) {
       HddsVolume volume = volumeSetIterator.next();
-      File hddsVolumeRootDir = volume.getHddsRootDir();
       Thread thread = new Thread(new ContainerReader(volumeSet, volume,
           containerSet, config));
       thread.start();
@@ -129,9 +146,8 @@ public class OzoneContainer {
    */
   public void start() throws IOException {
     LOG.info("Attempting to start container services.");
-    for (XceiverServerSpi serverinstance : server) {
-      serverinstance.start();
-    }
+    writeChannel.start();
+    readChannel.start();
     hddsDispatcher.init();
   }
 
@@ -141,9 +157,8 @@ public class OzoneContainer {
   public void stop() {
     //TODO: at end of container IO integration work.
     LOG.info("Attempting to stop container services.");
-    for(XceiverServerSpi serverinstance: server) {
-      serverinstance.stop();
-    }
+    writeChannel.stop();
+    readChannel.stop();
     hddsDispatcher.shutdown();
   }
 
@@ -155,101 +170,25 @@ public class OzoneContainer {
   /**
    * Returns container report.
    * @return - container report.
-   * @throws IOException
    */
-  public StorageContainerDatanodeProtocolProtos.ContainerReportsProto
-      getContainerReport() throws IOException {
-    return this.containerSet.getContainerReport();
+
+  public PipelineReportsProto getPipelineReport() {
+    PipelineReportsProto.Builder pipelineReportsProto =
+        PipelineReportsProto.newBuilder();
+    pipelineReportsProto.addAllPipelineReport(writeChannel.getPipelineReport());
+    return pipelineReportsProto.build();
   }
 
-  /**
-   * Submit ContainerRequest.
-   * @param request
-   * @param replicationType
-   * @throws IOException
-   */
-  public void submitContainerRequest(
-      ContainerProtos.ContainerCommandRequestProto request,
-      HddsProtos.ReplicationType replicationType) throws IOException {
-    XceiverServerSpi serverInstance;
-    long containerId = getContainerIdForCmd(request);
-    if (replicationType == HddsProtos.ReplicationType.RATIS) {
-      serverInstance = getRatisSerer();
-      Preconditions.checkNotNull(serverInstance);
-      serverInstance.submitRequest(request);
-      LOG.info("submitting {} request over RATIS server for container {}",
-          request.getCmdType(), containerId);
-    } else {
-      serverInstance = getStandaAloneSerer();
-      Preconditions.checkNotNull(serverInstance);
-      getStandaAloneSerer().submitRequest(request);
-      LOG.info(
-          "submitting {} request over STAND_ALONE server for container {}",
-          request.getCmdType(), containerId);
-    }
-
+  public XceiverServerSpi getWriteChannel() {
+    return writeChannel;
   }
 
-  private long getContainerIdForCmd(
-      ContainerProtos.ContainerCommandRequestProto request)
-      throws IllegalArgumentException {
-    ContainerProtos.Type type = request.getCmdType();
-    switch (type) {
-    case CloseContainer:
-      return request.getCloseContainer().getContainerID();
-      // Right now, we handle only closeContainer via queuing it over the
-      // over the XceiVerServer. For all other commands we throw Illegal
-      // argument exception here. Will need to extend the switch cases
-      // in case we want add another commands here.
-    default:
-      throw new IllegalArgumentException("Cmd " + request.getCmdType()
-          + " not supported over HearBeat Response");
-    }
+  public XceiverServerSpi getReadChannel() {
+    return readChannel;
   }
 
-  private XceiverServerSpi getRatisSerer() {
-    for (XceiverServerSpi serverInstance : server) {
-      if (serverInstance instanceof XceiverServerRatis) {
-        return serverInstance;
-      }
-    }
-    return null;
-  }
-
-  private XceiverServerSpi getStandaAloneSerer() {
-    for (XceiverServerSpi serverInstance : server) {
-      if (!(serverInstance instanceof XceiverServerRatis)) {
-        return serverInstance;
-      }
-    }
-    return null;
-  }
-
-  private int getPortbyType(HddsProtos.ReplicationType replicationType) {
-    for (XceiverServerSpi serverinstance : server) {
-      if (serverinstance.getServerType() == replicationType) {
-        return serverinstance.getIPCPort();
-      }
-    }
-    return INVALID_PORT;
-  }
-
-  /**
-   * Returns the container server IPC port.
-   *
-   * @return Container server IPC port.
-   */
-  public int getContainerServerPort() {
-    return getPortbyType(HddsProtos.ReplicationType.STAND_ALONE);
-  }
-
-  /**
-   * Returns the Ratis container Server IPC port.
-   *
-   * @return Ratis port.
-   */
-  public int getRatisContainerServerPort() {
-    return getPortbyType(HddsProtos.ReplicationType.RATIS);
+  public ContainerController getController() {
+    return controller;
   }
 
   /**

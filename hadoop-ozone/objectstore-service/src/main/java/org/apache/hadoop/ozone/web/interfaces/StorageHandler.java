@@ -298,7 +298,20 @@ public interface StorageHandler extends Closeable{
   KeyInfo getKeyInfo(KeyArgs args) throws IOException, OzoneException;
 
   /**
+   * Get detail information of the specified Key.
+   *
+   * @param args Key Args
+   *
+   * @return KeyInfo
+   *
+   * @throws IOException
+   * @throws OzoneException
+   */
+  KeyInfo getKeyInfoDetails(KeyArgs args) throws IOException, OzoneException;
+
+  /**
    * Closes all the opened resources.
    */
+  @Override
   void close();
 }

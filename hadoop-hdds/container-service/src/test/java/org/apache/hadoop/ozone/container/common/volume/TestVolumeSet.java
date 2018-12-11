@@ -22,13 +22,14 @@ import java.io.IOException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.FileUtil;
-import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.ozone.container.common.utils.HddsVolumeUtil;
+import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.test.GenericTestUtils.LogCapturer;
 
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.HDDS_DATANODE_DIR_KEY;
 import static org.apache.hadoop.ozone.container.common.volume.HddsVolume
     .HDDS_VOLUME_DIR;
 import static org.junit.Assert.assertEquals;
@@ -67,7 +68,7 @@ public class TestVolumeSet {
   }
 
   @Rule
-  public Timeout testTimeout = new Timeout(300_000);
+  public Timeout testTimeout = new Timeout(300000);
 
   @Before
   public void setup() throws Exception {
@@ -82,14 +83,16 @@ public class TestVolumeSet {
   @After
   public void shutdown() throws IOException {
     // Delete the hdds volume root dir
-    List<HddsVolume> volumes = new ArrayList<>();
-    volumes.addAll(volumeSet.getVolumesList());
-    volumes.addAll(volumeSet.getFailedVolumesList());
+    List<HddsVolume> hddsVolumes = new ArrayList<>();
+    hddsVolumes.addAll(volumeSet.getVolumesList());
+    hddsVolumes.addAll(volumeSet.getFailedVolumesList());
 
-    for (HddsVolume volume : volumes) {
+    for (HddsVolume volume : hddsVolumes) {
       FileUtils.deleteDirectory(volume.getHddsRootDir());
     }
     volumeSet.shutdown();
+
+    FileUtil.fullyDelete(new File(baseDir));
   }
 
   private boolean checkVolumeExistsInVolumeSet(String volume) {
@@ -149,8 +152,7 @@ public class TestVolumeSet {
     assertTrue(volumeSet.getFailedVolumesList().get(0).isFailed());
 
     // Failed volume should not exist in VolumeMap
-    Path volume1Path = new Path(volume1);
-    assertFalse(volumeSet.getVolumeMap().containsKey(volume1Path));
+    assertFalse(volumeSet.getVolumeMap().containsKey(volume1));
   }
 
   @Test
@@ -218,9 +220,34 @@ public class TestVolumeSet {
         // getAvailable() should throw null pointer exception as usage is null.
         volume.getAvailable();
         fail("Volume shutdown failed.");
-      } catch (NullPointerException ex) {
+      } catch (IOException ex) {
         // Do Nothing. Exception is expected.
+        assertTrue(ex.getMessage().contains(
+            "Volume Usage thread is not running."));
       }
+    }
+  }
+
+  @Test
+  public void testFailVolumes() throws  Exception{
+    VolumeSet volSet = null;
+    File readOnlyVolumePath = new File(baseDir);
+    //Set to readonly, so that this volume will be failed
+    readOnlyVolumePath.setReadOnly();
+    File volumePath = GenericTestUtils.getRandomizedTestDir();
+    OzoneConfiguration ozoneConfig = new OzoneConfiguration();
+    ozoneConfig.set(HDDS_DATANODE_DIR_KEY, readOnlyVolumePath.getAbsolutePath()
+        + "," + volumePath.getAbsolutePath());
+    volSet = new VolumeSet(UUID.randomUUID().toString(), ozoneConfig);
+    assertTrue(volSet.getFailedVolumesList().size() == 1);
+    assertEquals(readOnlyVolumePath, volSet.getFailedVolumesList().get(0)
+        .getHddsRootDir());
+
+    //Set back to writable
+    try {
+      readOnlyVolumePath.setWritable(true);
+    } finally {
+      FileUtil.fullyDelete(volumePath);
     }
 
   }

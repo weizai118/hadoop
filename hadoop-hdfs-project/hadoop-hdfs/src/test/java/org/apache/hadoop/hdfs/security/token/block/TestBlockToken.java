@@ -39,8 +39,8 @@ import java.util.EnumSet;
 import java.util.GregorianCalendar;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
@@ -94,7 +94,8 @@ import org.apache.hadoop.fs.StorageType;
 
 /** Unit tests for block tokens */
 public class TestBlockToken {
-  public static final Log LOG = LogFactory.getLog(TestBlockToken.class);
+  public static final Logger LOG =
+      LoggerFactory.getLogger(TestBlockToken.class);
   private static final String ADDRESS = "0.0.0.0";
 
   static {
@@ -215,7 +216,16 @@ public class TestBlockToken {
   private static void checkAccess(BlockTokenSecretManager m,
       Token<BlockTokenIdentifier> t, ExtendedBlock blk,
       BlockTokenIdentifier.AccessMode mode, StorageType[] storageTypes,
-      String[] storageIds) throws SecretManager.InvalidToken {
+      String[] storageIds) throws IOException {
+    if (storageIds == null) {
+      // Test overloaded checkAccess method.
+      m.checkAccess(t.decodeIdentifier(), null, blk, mode, storageTypes);
+
+      if (storageTypes == null) {
+        // Test overloaded checkAccess method.
+        m.checkAccess(t, null, blk, mode);
+      }
+    }
     m.checkAccess(t, null, blk, mode, storageTypes, storageIds);
   }
 
@@ -801,6 +811,8 @@ public class TestBlockToken {
         emptyStorageIds);
     sm.checkAccess(id, null, block3, mode, storageTypes,
         null);
+    sm.checkAccess(id, null, block3, mode, storageTypes);
+    sm.checkAccess(id, null, block3, mode);
   }
 
   @Test

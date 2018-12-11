@@ -86,7 +86,7 @@ Usage:
               [-files [-blocks [-locations | -racks | -replicaDetails | -upgradedomains]]]
               [-includeSnapshots] [-showprogress]
               [-storagepolicies] [-maintenance]
-              [-blockId <blk_Id>]
+              [-blockId <blk_Id>] [-replicate]
 
 | COMMAND\_OPTION | Description |
 |:---- |:---- |
@@ -106,6 +106,7 @@ Usage:
 | `-storagepolicies` | Print out storage policy summary for the blocks. |
 | `-maintenance` | Print out maintenance state node details. |
 | `-blockId` | Print out information about the block. |
+| `-replicate` | Initiate replication work to make mis-replicated blocks satisfy block placement policy. |
 
 Runs the HDFS filesystem checking utility. See [fsck](./HdfsUserGuide.html#fsck) for more info.
 
@@ -615,6 +616,8 @@ Usage:
           [-setStoragePolicy -path <path> -policy <policy>]
           [-getStoragePolicy -path <path>]
           [-unsetStoragePolicy -path <path>]
+          [-satisfyStoragePolicy -path <path>]
+          [-isSatisfierRunning]
           [-help <command-name>]
 
 Lists out all/Gets/sets/unsets storage policies. See the [HDFS Storage Policy Documentation](./ArchivalStorage.html) for more information.

@@ -24,11 +24,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.hadoop.hdfs.server.datanode.StorageLocation;
-import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
 import org.apache.hadoop.ozone.container.ContainerTestHelper;
@@ -45,17 +45,14 @@ import org.junit.Test;
  */
 public class TestContainerDeletionChoosingPolicy {
   private static String path;
-  private static ContainerSet containerSet;
-  private static OzoneConfiguration conf;
+  private  ContainerSet containerSet;
+  private OzoneConfiguration conf;
 
   @Before
   public void init() throws Throwable {
     conf = new OzoneConfiguration();
     path = GenericTestUtils
         .getTempPath(TestContainerDeletionChoosingPolicy.class.getSimpleName());
-    path += conf.getTrimmed(OzoneConfigKeys.OZONE_LOCALSTORAGE_ROOT,
-        OzoneConfigKeys.OZONE_LOCALSTORAGE_ROOT_DEFAULT);
-    conf.set(OzoneConfigKeys.OZONE_LOCALSTORAGE_ROOT, path);
   }
 
   @Test
@@ -75,8 +72,9 @@ public class TestContainerDeletionChoosingPolicy {
 
     int numContainers = 10;
     for (int i = 0; i < numContainers; i++) {
-      KeyValueContainerData data = new KeyValueContainerData(new Long(i),
-          ContainerTestHelper.CONTAINER_MAX_SIZE_GB);
+      KeyValueContainerData data = new KeyValueContainerData(i,
+          ContainerTestHelper.CONTAINER_MAX_SIZE, UUID.randomUUID().toString(),
+          UUID.randomUUID().toString());
       KeyValueContainer container = new KeyValueContainer(data, conf);
       containerSet.addContainer(container);
       Assert.assertTrue(
@@ -128,8 +126,10 @@ public class TestContainerDeletionChoosingPolicy {
     for (int i = 0; i <= numContainers; i++) {
       long containerId = RandomUtils.nextLong();
       KeyValueContainerData data =
-          new KeyValueContainerData(new Long(containerId),
-              ContainerTestHelper.CONTAINER_MAX_SIZE_GB);
+          new KeyValueContainerData(containerId,
+              ContainerTestHelper.CONTAINER_MAX_SIZE,
+              UUID.randomUUID().toString(),
+              UUID.randomUUID().toString());
       if (i != numContainers) {
         int deletionBlocks = random.nextInt(numContainers) + 1;
         data.incrPendingDeletionBlocks(deletionBlocks);

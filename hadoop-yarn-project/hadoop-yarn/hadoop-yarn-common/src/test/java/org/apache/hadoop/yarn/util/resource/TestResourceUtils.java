@@ -39,6 +39,9 @@ import java.util.Map;
  */
 public class TestResourceUtils {
 
+  private File nodeResourcesFile;
+  private File resourceTypesFile;
+
   static class ResourceFileInformation {
     String filename;
     int resourceCount;
@@ -75,12 +78,11 @@ public class TestResourceUtils {
 
   @After
   public void teardown() {
-    Configuration conf = new YarnConfiguration();
-    File source = new File(
-        conf.getClassLoader().getResource("resource-types-1.xml").getFile());
-    File dest = new File(source.getParent(), "resource-types.xml");
-    if (dest.exists()) {
-      dest.delete();
+    if(nodeResourcesFile != null && nodeResourcesFile.exists()) {
+      nodeResourcesFile.delete();
+    }
+    if(resourceTypesFile != null && resourceTypesFile.exists()) {
+      resourceTypesFile.delete();
     }
   }
 
@@ -136,8 +138,8 @@ public class TestResourceUtils {
       File source = new File(
           conf.getClassLoader().getResource(testInformation.filename)
               .getFile());
-      File dest = new File(source.getParent(), "resource-types.xml");
-      FileUtils.copyFile(source, dest);
+      resourceTypesFile = new File(source.getParent(), "resource-types.xml");
+      FileUtils.copyFile(source, resourceTypesFile);
       res = ResourceUtils.getResourceTypes();
       testMemoryAndVcores(res);
       Assert.assertEquals(testInformation.resourceCount, res.size());
@@ -148,7 +150,6 @@ public class TestResourceUtils {
             res.containsKey(resourceName));
         Assert.assertEquals(entry.getValue(), res.get(resourceName).getUnits());
       }
-      dest.delete();
     }
   }
 
@@ -161,20 +162,17 @@ public class TestResourceUtils {
         "resource-types-error-4.xml"};
     for (String resourceFile : resourceFiles) {
       ResourceUtils.resetResourceTypes();
-      File dest = null;
       try {
         File source =
             new File(conf.getClassLoader().getResource(resourceFile).getFile());
-        dest = new File(source.getParent(), "resource-types.xml");
-        FileUtils.copyFile(source, dest);
+        resourceTypesFile = new File(source.getParent(), "resource-types.xml");
+        FileUtils.copyFile(source, resourceTypesFile);
         ResourceUtils.getResourceTypes();
         Assert.fail("Expected error with file " + resourceFile);
       } catch (NullPointerException ne) {
         throw ne;
       } catch (Exception e) {
-        if (dest != null) {
-          dest.delete();
-        }
+        //Test passed
       }
     }
   }
@@ -275,7 +273,7 @@ public class TestResourceUtils {
         ResourceUtils.initializeResourcesMap(conf);
         Assert.fail("resource map initialization should fail");
       } catch (Exception e) {
-        // do nothing
+        //Test passed
       }
     }
   }
@@ -299,11 +297,10 @@ public class TestResourceUtils {
     for (Map.Entry<String, Resource> entry : testRun.entrySet()) {
       String resourceFile = entry.getKey();
       ResourceUtils.resetNodeResources();
-      File dest;
       File source = new File(
           conf.getClassLoader().getResource(resourceFile).getFile());
-      dest = new File(source.getParent(), "node-resources.xml");
-      FileUtils.copyFile(source, dest);
+      nodeResourcesFile = new File(source.getParent(), "node-resources.xml");
+      FileUtils.copyFile(source, nodeResourcesFile);
       Map<String, ResourceInformation> actual = ResourceUtils
           .getNodeResourceInformation(conf);
       Assert.assertEquals(actual.size(),
@@ -311,7 +308,6 @@ public class TestResourceUtils {
       for (ResourceInformation resInfo : entry.getValue().getResources()) {
         Assert.assertEquals(resInfo, actual.get(resInfo.getName()));
       }
-      dest.delete();
     }
   }
 
@@ -324,19 +320,16 @@ public class TestResourceUtils {
 
     for (String resourceFile : invalidNodeResFiles) {
       ResourceUtils.resetNodeResources();
-      File dest = null;
       try {
         File source = new File(conf.getClassLoader().getResource(resourceFile).getFile());
-        dest = new File(source.getParent(), "node-resources.xml");
-        FileUtils.copyFile(source, dest);
+        nodeResourcesFile = new File(source.getParent(), "node-resources.xml");
+        FileUtils.copyFile(source, nodeResourcesFile);
         Map<String, ResourceInformation> actual = ResourceUtils.getNodeResourceInformation(conf);
         Assert.fail("Expected error with file " + resourceFile);
       } catch (NullPointerException ne) {
         throw ne;
       } catch (Exception e) {
-        if (dest != null) {
-          dest.delete();
-        }
+        //Test passed
       }
     }
   }
@@ -373,6 +366,44 @@ public class TestResourceUtils {
             + " is illegal.");
       } catch (YarnRuntimeException e) {
         // Expected
+      }
+    }
+  }
+
+  @Test
+  public void testGetResourceInformationWithDiffUnits() throws Exception {
+
+    Configuration conf = new YarnConfiguration();
+    Map<String, Resource> testRun = new HashMap<>();
+    setupResourceTypes(conf, "resource-types-4.xml");
+    Resource test3Resources = Resource.newInstance(0, 0);
+
+    //Resource 'resource1' has been passed as 5T
+    //5T should be converted to 5000G
+    test3Resources.setResourceInformation("resource1",
+        ResourceInformation.newInstance("resource1", "T", 5L));
+
+    //Resource 'resource2' has been passed as 2M
+    //2M should be converted to 2000000000m
+    test3Resources.setResourceInformation("resource2",
+        ResourceInformation.newInstance("resource2", "M", 2L));
+    test3Resources.setResourceInformation("yarn.io/gpu",
+        ResourceInformation.newInstance("yarn.io/gpu", "", 1));
+    testRun.put("node-resources-3.xml", test3Resources);
+
+    for (Map.Entry<String, Resource> entry : testRun.entrySet()) {
+      String resourceFile = entry.getKey();
+      ResourceUtils.resetNodeResources();
+      File source = new File(
+          conf.getClassLoader().getResource(resourceFile).getFile());
+      nodeResourcesFile = new File(source.getParent(), "node-resources.xml");
+      FileUtils.copyFile(source, nodeResourcesFile);
+      Map<String, ResourceInformation> actual = ResourceUtils
+          .getNodeResourceInformation(conf);
+      Assert.assertEquals(actual.size(),
+          entry.getValue().getResources().length);
+      for (ResourceInformation resInfo : entry.getValue().getResources()) {
+        Assert.assertEquals(resInfo, actual.get(resInfo.getName()));
       }
     }
   }

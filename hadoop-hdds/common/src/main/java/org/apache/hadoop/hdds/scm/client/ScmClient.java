@@ -19,12 +19,13 @@ package org.apache.hadoop.hdds.scm.client;
 
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
-import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerInfo;
-import org.apache.hadoop.hdds.scm.container.common.helpers.Pipeline;
+import org.apache.hadoop.hdds.scm.container.ContainerInfo;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos
-    .ContainerData;
+    .ContainerDataProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
 
@@ -39,7 +40,7 @@ import java.util.List;
  * this interface will likely be removed.
  */
 @InterfaceStability.Unstable
-public interface ScmClient {
+public interface ScmClient extends Closeable {
   /**
    * Creates a Container on SCM and returns the pipeline.
    * @return ContainerInfo
@@ -61,7 +62,8 @@ public interface ScmClient {
    * @return ContainerWithPipeline
    * @throws IOException
    */
-  ContainerWithPipeline getContainerWithPipeline(long containerId) throws IOException;
+  ContainerWithPipeline getContainerWithPipeline(long containerId)
+      throws IOException;
 
   /**
    * Close a container.
@@ -87,7 +89,8 @@ public interface ScmClient {
    * @param force - true to forcibly delete the container.
    * @throws IOException
    */
-  void deleteContainer(long containerId, Pipeline pipeline, boolean force) throws IOException;
+  void deleteContainer(long containerId, Pipeline pipeline, boolean force)
+      throws IOException;
 
   /**
    * Deletes an existing container.
@@ -101,7 +104,7 @@ public interface ScmClient {
    * Lists a range of containers and get their info.
    *
    * @param startContainerID start containerID.
-   * @param count count must be > 0.
+   * @param count count must be {@literal >} 0.
    *
    * @return a list of pipeline.
    * @throws IOException
@@ -116,7 +119,7 @@ public interface ScmClient {
    * @return ContainerInfo
    * @throws IOException
    */
-  ContainerData readContainer(long containerID, Pipeline pipeline)
+  ContainerDataProto readContainer(long containerID, Pipeline pipeline)
       throws IOException;
 
   /**
@@ -125,7 +128,7 @@ public interface ScmClient {
    * @return ContainerInfo
    * @throws IOException
    */
-  ContainerData readContainer(long containerID)
+  ContainerDataProto readContainer(long containerID)
       throws IOException;
 
   /**
@@ -168,4 +171,36 @@ public interface ScmClient {
   Pipeline createReplicationPipeline(HddsProtos.ReplicationType type,
       HddsProtos.ReplicationFactor factor, HddsProtos.NodePool nodePool)
       throws IOException;
+
+  /**
+   * Returns the list of active Pipelines.
+   *
+   * @return list of Pipeline
+   * @throws IOException in case of any exception
+   */
+  List<Pipeline> listPipelines() throws IOException;
+
+  /**
+   * Closes the pipeline given a pipeline ID.
+   *
+   * @param pipelineID PipelineID to close.
+   * @throws IOException In case of exception while closing the pipeline
+   */
+  void closePipeline(HddsProtos.PipelineID pipelineID) throws IOException;
+
+  /**
+   * Check if SCM is in chill mode.
+   *
+   * @return Returns true if SCM is in chill mode else returns false.
+   * @throws IOException
+   */
+  boolean inChillMode() throws IOException;
+
+  /**
+   * Force SCM out of chill mode.
+   *
+   * @return returns true if operation is successful.
+   * @throws IOException
+   */
+  boolean forceExitChillMode() throws IOException;
 }

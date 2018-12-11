@@ -50,6 +50,7 @@ public class RouterQuotaManager {
 
   /**
    * Get all the mount quota paths.
+   * @return All the mount quota paths.
    */
   public Set<String> getAll() {
     readLock.lock();
@@ -88,8 +89,8 @@ public class RouterQuotaManager {
 
   /**
    * Get children paths (can including itself) under specified federation path.
-   * @param parentPath
-   * @return Set<String> Children path set.
+   * @param parentPath Federated path.
+   * @return Set of children paths.
    */
   public Set<String> getPaths(String parentPath) {
     readLock.lock();
@@ -154,6 +155,7 @@ public class RouterQuotaManager {
   /**
    * Check if the quota was set.
    * @param quota RouterQuotaUsage set in mount table.
+   * @return True if the quota is set.
    */
   public boolean isQuotaSet(RouterQuotaUsage quota) {
     if (quota != null) {
@@ -161,8 +163,8 @@ public class RouterQuotaManager {
       long ssQuota = quota.getSpaceQuota();
 
       // once nsQuota or ssQuota was set, this mount table is quota set
-      if (nsQuota != HdfsConstants.QUOTA_DONT_SET
-          || ssQuota != HdfsConstants.QUOTA_DONT_SET) {
+      if (nsQuota != HdfsConstants.QUOTA_RESET
+          || ssQuota != HdfsConstants.QUOTA_RESET) {
         return true;
       }
     }

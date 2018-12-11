@@ -1,23 +1,20 @@
 /**
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with this
+ * work for additional information regarding copyright ownership.  The ASF
+ * licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
  * <p>
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
  */
 package org.apache.hadoop.utils;
-
-import static org.apache.hadoop.test.PlatformAssumptions.assumeNotWindows;
 
 import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
@@ -30,8 +27,8 @@ import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.utils.MetadataKeyFilters.KeyPrefixFilter;
 import org.apache.hadoop.utils.MetadataKeyFilters.MetadataKeyFilter;
+import org.apache.hadoop.utils.MetadataStore.KeyValue;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -48,10 +45,16 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static junit.framework.TestCase.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.hadoop.test.PlatformAssumptions.assumeNotWindows;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.junit.runners.Parameterized.Parameters;
 
 /**
@@ -60,26 +63,23 @@ import static org.junit.runners.Parameterized.Parameters;
 @RunWith(Parameterized.class)
 public class TestMetadataStore {
 
+  private final static int MAX_GETRANGE_LENGTH = 100;
   private final String storeImpl;
-
+  @Rule
+  public ExpectedException expectedException = ExpectedException.none();
+  private MetadataStore store;
+  private File testDir;
   public TestMetadataStore(String metadataImpl) {
     this.storeImpl = metadataImpl;
   }
 
   @Parameters
   public static Collection<Object[]> data() {
-    return Arrays.asList(new Object[][] {
+    return Arrays.asList(new Object[][]{
         {OzoneConfigKeys.OZONE_METADATA_STORE_IMPL_LEVELDB},
         {OzoneConfigKeys.OZONE_METADATA_STORE_IMPL_ROCKSDB}
     });
   }
-
-  private MetadataStore store;
-  private File testDir;
-  private final static int MAX_GETRANGE_LENGTH = 100;
-
-  @Rule
-  public ExpectedException expectedException = ExpectedException.none();
 
   @Before
   public void init() throws IOException {
@@ -103,10 +103,64 @@ public class TestMetadataStore {
     // Add 20 entries.
     // {a0 : a-value0} to {a9 : a-value9}
     // {b0 : b-value0} to {b9 : b-value9}
-    for (int i=0; i<10; i++) {
+    for (int i = 0; i < 10; i++) {
       store.put(getBytes("a" + i), getBytes("a-value" + i));
       store.put(getBytes("b" + i), getBytes("b-value" + i));
     }
+  }
+
+  @Test
+  public void testIterator() throws Exception {
+    Configuration conf = new OzoneConfiguration();
+    conf.set(OzoneConfigKeys.OZONE_METADATA_STORE_IMPL, storeImpl);
+    File dbDir = GenericTestUtils.getRandomizedTestDir();
+    MetadataStore dbStore = MetadataStoreBuilder.newBuilder()
+        .setConf(conf)
+        .setCreateIfMissing(true)
+        .setDbFile(dbDir)
+        .build();
+
+    //As database is empty, check whether iterator is working as expected or
+    // not.
+    MetaStoreIterator<KeyValue> metaStoreIterator = dbStore.iterator();
+    assertFalse(metaStoreIterator.hasNext());
+    try {
+      metaStoreIterator.next();
+      fail("testIterator failed");
+    } catch (NoSuchElementException ex) {
+      GenericTestUtils.assertExceptionContains("Store has no more elements",
+          ex);
+    }
+
+    for (int i = 0; i < 10; i++) {
+      store.put(getBytes("a" + i), getBytes("a-value" + i));
+    }
+
+    metaStoreIterator = dbStore.iterator();
+
+    int i = 0;
+    while (metaStoreIterator.hasNext()) {
+      KeyValue val = metaStoreIterator.next();
+      assertEquals("a" + i, getString(val.getKey()));
+      assertEquals("a-value" + i, getString(val.getValue()));
+      i++;
+    }
+
+    // As we have iterated all the keys in database, hasNext should return
+    // false and next() should throw NoSuchElement exception.
+
+    assertFalse(metaStoreIterator.hasNext());
+    try {
+      metaStoreIterator.next();
+      fail("testIterator failed");
+    } catch (NoSuchElementException ex) {
+      GenericTestUtils.assertExceptionContains("Store has no more elements",
+          ex);
+    }
+    dbStore.close();
+    dbStore.destroy();
+    FileUtils.deleteDirectory(dbDir);
+
   }
 
   @Test
@@ -118,7 +172,7 @@ public class TestMetadataStore {
     GenericTestUtils.setLogLevel(MetadataStoreBuilder.LOG, Level.DEBUG);
     GenericTestUtils.LogCapturer logCapturer =
         GenericTestUtils.LogCapturer.captureLogs(MetadataStoreBuilder.LOG);
-    if(storeImpl.equals(OzoneConfigKeys.OZONE_METADATA_STORE_IMPL_LEVELDB)) {
+    if (storeImpl.equals(OzoneConfigKeys.OZONE_METADATA_STORE_IMPL_LEVELDB)) {
       dbType = "RocksDB";
     } else {
       dbType = "LevelDB";
@@ -181,19 +235,19 @@ public class TestMetadataStore {
 
   @Test
   public void testGetDelete() throws IOException {
-    for (int i=0; i<10; i++) {
+    for (int i = 0; i < 10; i++) {
       byte[] va = store.get(getBytes("a" + i));
-      Assert.assertEquals("a-value" + i, getString(va));
+      assertEquals("a-value" + i, getString(va));
 
       byte[] vb = store.get(getBytes("b" + i));
-      Assert.assertEquals("b-value" + i, getString(vb));
+      assertEquals("b-value" + i, getString(vb));
     }
 
     String keyToDel = "del-" + UUID.randomUUID().toString();
     store.put(getBytes(keyToDel), getBytes(keyToDel));
-    Assert.assertEquals(keyToDel, getString(store.get(getBytes(keyToDel))));
+    assertEquals(keyToDel, getString(store.get(getBytes(keyToDel))));
     store.delete(getBytes(keyToDel));
-    Assert.assertEquals(null, store.get(getBytes(keyToDel)));
+    assertEquals(null, store.get(getBytes(keyToDel)));
   }
 
   @Test
@@ -213,7 +267,7 @@ public class TestMetadataStore {
       return null;
     }
     char[] arr = key.toCharArray();
-    return new StringBuffer().append(arr[0]).append("-value")
+    return new StringBuilder().append(arr[0]).append("-value")
         .append(arr[arr.length - 1]).toString();
   }
 
@@ -228,8 +282,8 @@ public class TestMetadataStore {
       k = getString(current.getKey());
       v = getString(current.getValue());
     }
-    Assert.assertEquals(peekKey, k);
-    Assert.assertEquals(v, getExpectedValue(peekKey));
+    assertEquals(peekKey, k);
+    assertEquals(v, getExpectedValue(peekKey));
 
     // Look for prev
     k = null;
@@ -240,8 +294,8 @@ public class TestMetadataStore {
       k = getString(prev.getKey());
       v = getString(prev.getValue());
     }
-    Assert.assertEquals(prevKey, k);
-    Assert.assertEquals(v, getExpectedValue(prevKey));
+    assertEquals(prevKey, k);
+    assertEquals(v, getExpectedValue(prevKey));
 
     // Look for next
     k = null;
@@ -252,8 +306,8 @@ public class TestMetadataStore {
       k = getString(next.getKey());
       v = getString(next.getValue());
     }
-    Assert.assertEquals(nextKey, k);
-    Assert.assertEquals(v, getExpectedValue(nextKey));
+    assertEquals(nextKey, k);
+    assertEquals(v, getExpectedValue(nextKey));
   }
 
   @Test
@@ -266,14 +320,14 @@ public class TestMetadataStore {
       char num = value.charAt(value.length() - 1);
       // each value adds 1
       int i = Character.getNumericValue(num) + 1;
-      value =  value.substring(0, value.length() - 1) + i;
+      value = value.substring(0, value.length() - 1) + i;
       result.add(value);
       return true;
     });
 
-    Assert.assertFalse(result.isEmpty());
-    for (int i=0; i<result.size(); i++) {
-      Assert.assertEquals("b-value" + (i+1), result.get(i));
+    assertFalse(result.isEmpty());
+    for (int i = 0; i < result.size(); i++) {
+      assertEquals("b-value" + (i + 1), result.get(i));
     }
 
     // iterate from a non exist key
@@ -282,7 +336,7 @@ public class TestMetadataStore {
       result.add(getString(v));
       return true;
     });
-    Assert.assertTrue(result.isEmpty());
+    assertTrue(result.isEmpty());
 
     // iterate from the beginning
     result.clear();
@@ -290,7 +344,7 @@ public class TestMetadataStore {
       result.add(getString(v));
       return true;
     });
-    Assert.assertEquals(20, result.size());
+    assertEquals(20, result.size());
   }
 
   @Test
@@ -299,66 +353,66 @@ public class TestMetadataStore {
 
     // Set empty startKey will return values from beginning.
     result = store.getRangeKVs(null, 5);
-    Assert.assertEquals(5, result.size());
-    Assert.assertEquals("a-value2", getString(result.get(2).getValue()));
+    assertEquals(5, result.size());
+    assertEquals("a-value2", getString(result.get(2).getValue()));
 
     // Empty list if startKey doesn't exist.
     result = store.getRangeKVs(getBytes("a12"), 5);
-    Assert.assertEquals(0, result.size());
+    assertEquals(0, result.size());
 
     // Returns max available entries after a valid startKey.
     result = store.getRangeKVs(getBytes("b0"), MAX_GETRANGE_LENGTH);
-    Assert.assertEquals(10, result.size());
-    Assert.assertEquals("b0", getString(result.get(0).getKey()));
-    Assert.assertEquals("b-value0", getString(result.get(0).getValue()));
+    assertEquals(10, result.size());
+    assertEquals("b0", getString(result.get(0).getKey()));
+    assertEquals("b-value0", getString(result.get(0).getValue()));
     result = store.getRangeKVs(getBytes("b0"), 5);
-    Assert.assertEquals(5, result.size());
+    assertEquals(5, result.size());
 
     // Both startKey and count are honored.
     result = store.getRangeKVs(getBytes("a9"), 2);
-    Assert.assertEquals(2, result.size());
-    Assert.assertEquals("a9", getString(result.get(0).getKey()));
-    Assert.assertEquals("a-value9", getString(result.get(0).getValue()));
-    Assert.assertEquals("b0", getString(result.get(1).getKey()));
-    Assert.assertEquals("b-value0", getString(result.get(1).getValue()));
+    assertEquals(2, result.size());
+    assertEquals("a9", getString(result.get(0).getKey()));
+    assertEquals("a-value9", getString(result.get(0).getValue()));
+    assertEquals("b0", getString(result.get(1).getKey()));
+    assertEquals("b-value0", getString(result.get(1).getValue()));
 
     // Filter keys by prefix.
     // It should returns all "b*" entries.
     MetadataKeyFilter filter1 = new KeyPrefixFilter().addFilter("b");
     result = store.getRangeKVs(null, 100, filter1);
-    Assert.assertEquals(10, result.size());
-    Assert.assertTrue(result.stream().allMatch(entry ->
-        new String(entry.getKey()).startsWith("b")
+    assertEquals(10, result.size());
+    assertTrue(result.stream().allMatch(entry ->
+        new String(entry.getKey(), UTF_8).startsWith("b")
     ));
-    Assert.assertEquals(20, filter1.getKeysScannedNum());
-    Assert.assertEquals(10, filter1.getKeysHintedNum());
+    assertEquals(20, filter1.getKeysScannedNum());
+    assertEquals(10, filter1.getKeysHintedNum());
     result = store.getRangeKVs(null, 3, filter1);
-    Assert.assertEquals(3, result.size());
+    assertEquals(3, result.size());
     result = store.getRangeKVs(getBytes("b3"), 1, filter1);
-    Assert.assertEquals("b-value3", getString(result.get(0).getValue()));
+    assertEquals("b-value3", getString(result.get(0).getValue()));
 
     // Define a customized filter that filters keys by suffix.
     // Returns all "*2" entries.
     MetadataKeyFilter filter2 = (preKey, currentKey, nextKey)
         -> getString(currentKey).endsWith("2");
     result = store.getRangeKVs(null, MAX_GETRANGE_LENGTH, filter2);
-    Assert.assertEquals(2, result.size());
-    Assert.assertEquals("a2", getString(result.get(0).getKey()));
-    Assert.assertEquals("b2", getString(result.get(1).getKey()));
+    assertEquals(2, result.size());
+    assertEquals("a2", getString(result.get(0).getKey()));
+    assertEquals("b2", getString(result.get(1).getKey()));
     result = store.getRangeKVs(null, 1, filter2);
-    Assert.assertEquals(1, result.size());
-    Assert.assertEquals("a2", getString(result.get(0).getKey()));
+    assertEquals(1, result.size());
+    assertEquals("a2", getString(result.get(0).getKey()));
 
     // Apply multiple filters.
     result = store.getRangeKVs(null, MAX_GETRANGE_LENGTH, filter1, filter2);
-    Assert.assertEquals(1, result.size());
-    Assert.assertEquals("b2", getString(result.get(0).getKey()));
-    Assert.assertEquals("b-value2", getString(result.get(0).getValue()));
+    assertEquals(1, result.size());
+    assertEquals("b2", getString(result.get(0).getKey()));
+    assertEquals("b-value2", getString(result.get(0).getValue()));
 
     // If filter is null, no effect.
-    result = store.getRangeKVs(null, 1, null);
-    Assert.assertEquals(1, result.size());
-    Assert.assertEquals("a0", getString(result.get(0).getKey()));
+    result = store.getRangeKVs(null, 1, (MetadataKeyFilter[]) null);
+    assertEquals(1, result.size());
+    assertEquals("a0", getString(result.get(0).getKey()));
   }
 
   @Test
@@ -368,16 +422,16 @@ public class TestMetadataStore {
     // Suppose to return a2 and b2
     List<Map.Entry<byte[], byte[]>> result =
         store.getRangeKVs(null, MAX_GETRANGE_LENGTH, suffixFilter);
-    Assert.assertEquals(2, result.size());
-    Assert.assertEquals("a2", DFSUtil.bytes2String(result.get(0).getKey()));
-    Assert.assertEquals("b2", DFSUtil.bytes2String(result.get(1).getKey()));
+    assertEquals(2, result.size());
+    assertEquals("a2", DFSUtil.bytes2String(result.get(0).getKey()));
+    assertEquals("b2", DFSUtil.bytes2String(result.get(1).getKey()));
 
     // Suppose to return just a2, because when it iterates to a3,
     // the filter no long matches and it should stop from there.
     result = store.getSequentialRangeKVs(null,
         MAX_GETRANGE_LENGTH, suffixFilter);
-    Assert.assertEquals(1, result.size());
-    Assert.assertEquals("a2", DFSUtil.bytes2String(result.get(0).getKey()));
+    assertEquals(1, result.size());
+    assertEquals("a2", DFSUtil.bytes2String(result.get(0).getKey()));
   }
 
   @Test
@@ -385,10 +439,10 @@ public class TestMetadataStore {
     List<Map.Entry<byte[], byte[]>> result = null;
 
     result = store.getRangeKVs(null, 0);
-    Assert.assertEquals(0, result.size());
+    assertEquals(0, result.size());
 
     result = store.getRangeKVs(null, 1);
-    Assert.assertEquals(1, result.size());
+    assertEquals(1, result.size());
 
     // Count less than zero is invalid.
     expectedException.expect(IllegalArgumentException.class);
@@ -401,7 +455,7 @@ public class TestMetadataStore {
     // If startKey is invalid, the returned list should be empty.
     List<Map.Entry<byte[], byte[]>> kvs =
         store.getRangeKVs(getBytes("unknownKey"), MAX_GETRANGE_LENGTH);
-    Assert.assertEquals(kvs.size(), 0);
+    assertEquals(0, kvs.size());
   }
 
   @Test
@@ -421,13 +475,13 @@ public class TestMetadataStore {
     dbStore.put(getBytes("key1"), getBytes("value1"));
     dbStore.put(getBytes("key2"), getBytes("value2"));
 
-    Assert.assertFalse(dbStore.isEmpty());
-    Assert.assertTrue(dbDir.exists());
-    Assert.assertTrue(dbDir.listFiles().length > 0);
+    assertFalse(dbStore.isEmpty());
+    assertTrue(dbDir.exists());
+    assertTrue(dbDir.listFiles().length > 0);
 
     dbStore.destroy();
 
-    Assert.assertFalse(dbDir.exists());
+    assertFalse(dbDir.exists());
   }
 
   @Test
@@ -444,7 +498,7 @@ public class TestMetadataStore {
         .build();
 
     List<String> expectedResult = Lists.newArrayList();
-    for (int i = 0; i<10; i++) {
+    for (int i = 0; i < 10; i++) {
       dbStore.put(getBytes("batch-" + i), getBytes("batch-value-" + i));
       expectedResult.add("batch-" + i);
     }
@@ -469,7 +523,7 @@ public class TestMetadataStore {
       return it.hasNext() && it.next().equals(getString(key));
     });
 
-    Assert.assertEquals(8, count.get());
+    assertEquals(8, count.get());
   }
 
   @Test
@@ -481,53 +535,54 @@ public class TestMetadataStore {
       new KeyPrefixFilter().addFilter("b0", true).addFilter("b");
     } catch (IllegalArgumentException e) {
       exception = e;
+      assertTrue(exception.getMessage().contains("KeyPrefix: b already " +
+          "rejected"));
     }
-    Assert.assertTrue(
-        exception.getMessage().contains("KeyPrefix: b already rejected"));
 
     try {
       new KeyPrefixFilter().addFilter("b0").addFilter("b", true);
     } catch (IllegalArgumentException e) {
       exception = e;
+      assertTrue(exception.getMessage().contains("KeyPrefix: b already " +
+          "accepted"));
     }
-    Assert.assertTrue(
-        exception.getMessage().contains("KeyPrefix: b already accepted"));
 
     try {
       new KeyPrefixFilter().addFilter("b", true).addFilter("b0");
     } catch (IllegalArgumentException e) {
       exception = e;
+      assertTrue(exception.getMessage().contains("KeyPrefix: b0 already " +
+          "rejected"));
     }
-    Assert.assertTrue(
-        exception.getMessage().contains("KeyPrefix: b0 already rejected"));
 
     try {
       new KeyPrefixFilter().addFilter("b").addFilter("b0", true);
     } catch (IllegalArgumentException e) {
       exception = e;
+      assertTrue(exception.getMessage().contains("KeyPrefix: b0 already " +
+          "accepted"));
     }
-    Assert.assertTrue(
-        exception.getMessage().contains("KeyPrefix: b0 already accepted"));
 
     MetadataKeyFilter filter1 = new KeyPrefixFilter(true)
-            .addFilter("a0")
-            .addFilter("a1")
-            .addFilter("b", true);
+        .addFilter("a0")
+        .addFilter("a1")
+        .addFilter("b", true);
     result = store.getRangeKVs(null, 100, filter1);
-    Assert.assertEquals(2, result.size());
-    Assert.assertTrue(result.stream()
-        .anyMatch(entry -> new String(entry.getKey()).startsWith("a0"))
-        && result.stream()
-        .anyMatch(entry -> new String(entry.getKey()).startsWith("a1")));
+    assertEquals(2, result.size());
+    assertTrue(result.stream().anyMatch(entry -> new String(entry.getKey(),
+        UTF_8)
+        .startsWith("a0")) && result.stream().anyMatch(entry -> new String(
+        entry.getKey(), UTF_8).startsWith("a1")));
 
     filter1 = new KeyPrefixFilter(true).addFilter("b", true);
     result = store.getRangeKVs(null, 100, filter1);
-    Assert.assertEquals(0, result.size());
+    assertEquals(0, result.size());
 
     filter1 = new KeyPrefixFilter().addFilter("b", true);
     result = store.getRangeKVs(null, 100, filter1);
-    Assert.assertEquals(10, result.size());
-    Assert.assertTrue(result.stream()
-        .allMatch(entry -> new String(entry.getKey()).startsWith("a")));
+    assertEquals(10, result.size());
+    assertTrue(result.stream().allMatch(entry -> new String(entry.getKey(),
+        UTF_8)
+        .startsWith("a")));
   }
 }

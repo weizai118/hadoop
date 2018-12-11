@@ -27,7 +27,7 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
@@ -95,16 +95,20 @@ public abstract class SCMCommonPolicy implements ContainerPlacementPolicy {
    * 3. if a set of containers are requested, we either meet the required
    * number of nodes or we fail that request.
    *
+   *
+   * @param excludedNodes - datanodes with existing replicas
    * @param nodesRequired - number of datanodes required.
    * @param sizeRequired - size required for the container or block.
    * @return list of datanodes chosen.
    * @throws SCMException SCM exception.
    */
-
-  public List<DatanodeDetails> chooseDatanodes(int nodesRequired, final long
-      sizeRequired) throws SCMException {
+  @Override
+  public List<DatanodeDetails> chooseDatanodes(
+      List<DatanodeDetails> excludedNodes,
+      int nodesRequired, final long sizeRequired) throws SCMException {
     List<DatanodeDetails> healthyNodes =
         nodeManager.getNodes(HddsProtos.NodeState.HEALTHY);
+    healthyNodes.removeAll(excludedNodes);
     String msg;
     if (healthyNodes.size() == 0) {
       msg = "No healthy node found to allocate container.";
@@ -146,8 +150,8 @@ public abstract class SCMCommonPolicy implements ContainerPlacementPolicy {
   private boolean hasEnoughSpace(DatanodeDetails datanodeDetails,
                                  long sizeRequired) {
     SCMNodeMetric nodeMetric = nodeManager.getNodeStat(datanodeDetails);
-    return (nodeMetric != null) && nodeMetric.get().getRemaining()
-        .hasResources(sizeRequired);
+    return (nodeMetric != null) && (nodeMetric.get() != null)
+        && nodeMetric.get().getRemaining().hasResources(sizeRequired);
   }
 
   /**
@@ -163,7 +167,7 @@ public abstract class SCMCommonPolicy implements ContainerPlacementPolicy {
   public List<DatanodeDetails> getResultSet(
       int nodesRequired, List<DatanodeDetails> healthyNodes)
       throws SCMException {
-    List<DatanodeDetails> results = new LinkedList<>();
+    List<DatanodeDetails> results = new ArrayList<>();
     for (int x = 0; x < nodesRequired; x++) {
       // invoke the choose function defined in the derived classes.
       DatanodeDetails nodeId = chooseNode(healthyNodes);

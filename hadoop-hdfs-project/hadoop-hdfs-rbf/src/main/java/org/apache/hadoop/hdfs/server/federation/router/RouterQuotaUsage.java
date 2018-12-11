@@ -72,7 +72,7 @@ public final class RouterQuotaUsage extends QuotaUsage {
   /**
    * Verify if namespace quota is violated once quota is set. Relevant
    * method {@link DirectoryWithQuotaFeature#verifyNamespaceQuota}.
-   * @throws NSQuotaExceededException
+   * @throws NSQuotaExceededException If the quota is exceeded.
    */
   public void verifyNamespaceQuota() throws NSQuotaExceededException {
     if (Quota.isViolated(getQuota(), getFileAndDirectoryCount())) {
@@ -84,7 +84,7 @@ public final class RouterQuotaUsage extends QuotaUsage {
   /**
    * Verify if storage space quota is violated once quota is set. Relevant
    * method {@link DirectoryWithQuotaFeature#verifyStoragespaceQuota}.
-   * @throws DSQuotaExceededException
+   * @throws DSQuotaExceededException If the quota is exceeded.
    */
   public void verifyStoragespaceQuota() throws DSQuotaExceededException {
     if (Quota.isViolated(getSpaceQuota(), getSpaceConsumed())) {
@@ -96,14 +96,14 @@ public final class RouterQuotaUsage extends QuotaUsage {
   public String toString() {
     String nsQuota = String.valueOf(getQuota());
     String nsCount = String.valueOf(getFileAndDirectoryCount());
-    if (getQuota() == HdfsConstants.QUOTA_DONT_SET) {
+    if (getQuota() == HdfsConstants.QUOTA_RESET) {
       nsQuota = "-";
       nsCount = "-";
     }
 
     String ssQuota = StringUtils.byteDesc(getSpaceQuota());
     String ssCount = StringUtils.byteDesc(getSpaceConsumed());
-    if (getSpaceQuota() == HdfsConstants.QUOTA_DONT_SET) {
+    if (getSpaceQuota() == HdfsConstants.QUOTA_RESET) {
       ssQuota = "-";
       ssCount = "-";
     }

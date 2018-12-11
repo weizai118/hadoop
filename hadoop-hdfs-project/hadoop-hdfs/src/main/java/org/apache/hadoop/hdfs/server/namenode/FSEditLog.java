@@ -417,13 +417,14 @@ public class FSEditLog implements LogsPurgeable {
    * File-based journals are skipped, since they are formatted by the
    * Storage format code.
    */
-  synchronized void formatNonFileJournals(NamespaceInfo nsInfo) throws IOException {
+  synchronized void formatNonFileJournals(NamespaceInfo nsInfo, boolean force)
+      throws IOException {
     Preconditions.checkState(state == State.BETWEEN_LOG_SEGMENTS,
         "Bad state: %s", state);
     
     for (JournalManager jm : journalSet.getJournalManagers()) {
       if (!(jm instanceof FileJournalManager)) {
-        jm.format(nsInfo);
+        jm.format(nsInfo, force);
       }
     }
   }
@@ -1381,10 +1382,15 @@ public class FSEditLog implements LogsPurgeable {
     try {
       editLogStream = journalSet.startLogSegment(segmentTxId, layoutVersion);
     } catch (IOException ex) {
-      throw new IOException("Unable to start log segment " +
-          segmentTxId + ": too few journals successfully started.", ex);
+      final String msg = "Unable to start log segment " + segmentTxId
+          + ": too few journals successfully started.";
+      LOG.error(msg, ex);
+      synchronized (journalSetLock) {
+        IOUtils.cleanupWithLogger(LOG, journalSet);
+      }
+      terminate(1, msg);
     }
-    
+
     curSegmentTxId = segmentTxId;
     state = State.IN_SEGMENT;
   }

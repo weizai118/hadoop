@@ -19,6 +19,7 @@ package org.apache.hadoop.hdds.scm;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.ratis.proto.RaftProtos.ReplicationLevel;
 import org.apache.ratis.util.TimeDuration;
 
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,11 @@ import java.util.concurrent.TimeUnit;
 @InterfaceAudience.Public
 @InterfaceStability.Unstable
 public final class ScmConfigKeys {
+
+  // Location of SCM DB files. For now we just support a single
+  // metadata dir but in future we may support multiple for redundancy or
+  // performance.
+  public static final String OZONE_SCM_DB_DIRS = "ozone.scm.db.dirs";
 
   public static final String SCM_CONTAINER_CLIENT_STALE_THRESHOLD_KEY =
       "scm.container.client.idle.threshold";
@@ -49,10 +55,6 @@ public final class ScmConfigKeys {
       = "dfs.container.ratis.enabled";
   public static final boolean DFS_CONTAINER_RATIS_ENABLED_DEFAULT
       = false;
-  public static final String DFS_CONTAINER_GRPC_ENABLED_KEY
-      = "dfs.container.grpc.enabled";
-  public static final boolean DFS_CONTAINER_GRPC_ENABLED_DEFAULT
-      = false;
   public static final String DFS_CONTAINER_RATIS_RPC_TYPE_KEY
       = "dfs.container.ratis.rpc.type";
   public static final String DFS_CONTAINER_RATIS_RPC_TYPE_DEFAULT
@@ -61,30 +63,88 @@ public final class ScmConfigKeys {
       = "dfs.container.ratis.num.write.chunk.threads";
   public static final int DFS_CONTAINER_RATIS_NUM_WRITE_CHUNK_THREADS_DEFAULT
       = 60;
+  public static final String DFS_CONTAINER_RATIS_REPLICATION_LEVEL_KEY
+      = "dfs.container.ratis.replication.level";
+  public static final ReplicationLevel
+      DFS_CONTAINER_RATIS_REPLICATION_LEVEL_DEFAULT = ReplicationLevel.MAJORITY;
+  public static final String DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_KEY
+      = "dfs.container.ratis.num.container.op.executors";
+  public static final int DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_DEFAULT
+      = 10;
   public static final String DFS_CONTAINER_RATIS_SEGMENT_SIZE_KEY =
       "dfs.container.ratis.segment.size";
-  public static final int DFS_CONTAINER_RATIS_SEGMENT_SIZE_DEFAULT =
-      1 * 1024 * 1024 * 1024;
+  public static final String DFS_CONTAINER_RATIS_SEGMENT_SIZE_DEFAULT =
+      "16KB";
   public static final String DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_KEY =
       "dfs.container.ratis.segment.preallocated.size";
+  public static final String
+      DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT = "128MB";
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT =
+      "dfs.container.ratis.statemachinedata.sync.timeout";
+  public static final TimeDuration
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT_DEFAULT =
+      TimeDuration.valueOf(10, TimeUnit.SECONDS);
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES =
+      "dfs.container.ratis.statemachinedata.sync.retries";
   public static final int
-      DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT = 128 * 1024 * 1024;
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES_DEFAULT = -1;
+  public static final String DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE =
+      "dfs.container.ratis.log.queue.size";
+  public static final int DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE_DEFAULT = 128;
+
+  // expiry interval stateMachineData cache entry inside containerStateMachine
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL =
+      "dfs.container.ratis.statemachine.cache.expiry.interval";
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL_DEFAULT =
+      "10s";
   public static final String DFS_RATIS_CLIENT_REQUEST_TIMEOUT_DURATION_KEY =
       "dfs.ratis.client.request.timeout.duration";
   public static final TimeDuration
       DFS_RATIS_CLIENT_REQUEST_TIMEOUT_DURATION_DEFAULT =
       TimeDuration.valueOf(3000, TimeUnit.MILLISECONDS);
+  public static final String DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_KEY =
+      "dfs.ratis.client.request.max.retries";
+  public static final int DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_DEFAULT = 180;
+  public static final String DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_KEY =
+      "dfs.ratis.client.request.retry.interval";
+  public static final TimeDuration
+      DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_DEFAULT =
+      TimeDuration.valueOf(100, TimeUnit.MILLISECONDS);
+  public static final String DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_KEY =
+      "dfs.ratis.server.retry-cache.timeout.duration";
+  public static final TimeDuration
+      DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_DEFAULT =
+      TimeDuration.valueOf(600000, TimeUnit.MILLISECONDS);
   public static final String DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_KEY =
       "dfs.ratis.server.request.timeout.duration";
   public static final TimeDuration
       DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_DEFAULT =
       TimeDuration.valueOf(3000, TimeUnit.MILLISECONDS);
+  public static final String
+      DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_KEY =
+      "dfs.ratis.leader.election.minimum.timeout.duration";
+  public static final TimeDuration
+      DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_DEFAULT =
+      TimeDuration.valueOf(1, TimeUnit.SECONDS);
+
+  public static final String DFS_RATIS_SNAPSHOT_THRESHOLD_KEY =
+      "dfs.ratis.snapshot.threshold";
+  public static final long DFS_RATIS_SNAPSHOT_THRESHOLD_DEFAULT = 10000;
+
+  public static final String DFS_RATIS_SERVER_FAILURE_DURATION_KEY =
+      "dfs.ratis.server.failure.duration";
+  public static final TimeDuration
+      DFS_RATIS_SERVER_FAILURE_DURATION_DEFAULT =
+      TimeDuration.valueOf(120, TimeUnit.SECONDS);
 
   // TODO : this is copied from OzoneConsts, may need to move to a better place
   public static final String OZONE_SCM_CHUNK_SIZE_KEY = "ozone.scm.chunk.size";
   // 16 MB by default
-  public static final int OZONE_SCM_CHUNK_SIZE_DEFAULT = 16 * 1024 * 1024;
-  public static final int OZONE_SCM_CHUNK_MAX_SIZE = 32 * 1024 * 1024;
+  public static final String OZONE_SCM_CHUNK_SIZE_DEFAULT = "16MB";
 
   public static final String OZONE_SCM_CLIENT_PORT_KEY =
       "ozone.scm.client.port";
@@ -173,8 +233,8 @@ public final class ScmConfigKeys {
 
   public static final String OZONE_SCM_HEARTBEAT_RPC_TIMEOUT =
       "ozone.scm.heartbeat.rpc-timeout";
-  public static final long OZONE_SCM_HEARTBEAT_RPC_TIMEOUT_DEFAULT =
-      1000;
+  public static final String OZONE_SCM_HEARTBEAT_RPC_TIMEOUT_DEFAULT =
+      "1s";
 
   /**
    * Defines how frequently we will log the missing of heartbeat to a specific
@@ -215,9 +275,9 @@ public final class ScmConfigKeys {
       "ozone.scm.db.cache.size.mb";
   public static final int OZONE_SCM_DB_CACHE_SIZE_DEFAULT = 128;
 
-  public static final String OZONE_SCM_CONTAINER_SIZE_GB =
-      "ozone.scm.container.size.gb";
-  public static final int OZONE_SCM_CONTAINER_SIZE_DEFAULT = 5;
+  public static final String OZONE_SCM_CONTAINER_SIZE =
+      "ozone.scm.container.size";
+  public static final String OZONE_SCM_CONTAINER_SIZE_DEFAULT = "5GB";
 
   public static final String OZONE_SCM_CONTAINER_PLACEMENT_IMPL_KEY =
       "ozone.scm.container.placement.impl";
@@ -236,21 +296,22 @@ public final class ScmConfigKeys {
   public static final String
       OZONE_SCM_CONTAINER_CREATION_LEASE_TIMEOUT_DEFAULT = "60s";
 
-  public static final String OZONE_SCM_PIPELINE_CREATION_LEASE_TIMEOUT =
-      "ozone.scm.pipeline.creation.lease.timeout";
+  public static final String OZONE_SCM_PIPELINE_DESTROY_TIMEOUT =
+      "ozone.scm.pipeline.destroy.timeout";
 
-  public static final String
-      OZONE_SCM_PIPELINE_CREATION_LEASE_TIMEOUT_DEFAULT = "60s";
+  public static final String OZONE_SCM_PIPELINE_DESTROY_TIMEOUT_DEFAULT =
+      "300s";
 
   public static final String OZONE_SCM_BLOCK_DELETION_MAX_RETRY =
       "ozone.scm.block.deletion.max.retry";
   public static final int OZONE_SCM_BLOCK_DELETION_MAX_RETRY_DEFAULT = 4096;
 
-  // Once a container usage crosses this threshold, it is eligible for
-  // closing.
-  public static final String OZONE_SCM_CONTAINER_CLOSE_THRESHOLD =
-      "ozone.scm.container.close.threshold";
-  public static final float OZONE_SCM_CONTAINER_CLOSE_THRESHOLD_DEFAULT = 0.9f;
+  public static final String HDDS_SCM_WATCHER_TIMEOUT =
+      "hdds.scm.watcher.timeout";
+
+  public static final String HDDS_SCM_WATCHER_TIMEOUT_DEFAULT =
+      "10m";
+
   /**
    * Never constructed.
    */

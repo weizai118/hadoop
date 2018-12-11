@@ -147,7 +147,7 @@ public class QJournalProtocolServerSideTranslatorPB implements QJournalProtocolP
     try {
       impl.format(request.getJid().getIdentifier(),
           request.hasNameServiceId() ? request.getNameServiceId() : null,
-          PBHelper.convert(request.getNsInfo()));
+          PBHelper.convert(request.getNsInfo()), request.getForce());
       return FormatResponseProto.getDefaultInstance();
     } catch (IOException ioe) {
       throw new ServiceException(ioe);
@@ -168,7 +168,7 @@ public class QJournalProtocolServerSideTranslatorPB implements QJournalProtocolP
     return VOID_JOURNAL_RESPONSE;
   }
 
-  /** @see JournalProtocol#heartbeat */
+  /** @see QJournalProtocol#heartbeat */
   @Override
   public HeartbeatResponseProto heartbeat(RpcController controller,
       HeartbeatRequestProto req) throws ServiceException {

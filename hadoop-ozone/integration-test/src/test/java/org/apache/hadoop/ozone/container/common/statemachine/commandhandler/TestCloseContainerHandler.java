@@ -19,6 +19,9 @@ package org.apache.hadoop.ozone.container.common.statemachine.commandhandler;
 
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.scm.container.ContainerID;
+import org.apache.hadoop.hdds.scm.container.ContainerInfo;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.ozone.client.ObjectStore;
 import org.apache.hadoop.ozone.client.OzoneClient;
@@ -32,8 +35,7 @@ import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.hadoop.ozone.protocol.commands.CloseContainerCommand;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE_GB;
-import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.junit.Assert;
 import org.junit.Test;
@@ -52,7 +54,7 @@ public class TestCloseContainerHandler {
 
     //setup a cluster (1G free space is enough for a unit test)
     OzoneConfiguration conf = new OzoneConfiguration();
-    conf.set(OZONE_SCM_CONTAINER_SIZE_GB, "1");
+    conf.set(OZONE_SCM_CONTAINER_SIZE, "1GB");
     MiniOzoneCluster cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(1).build();
     cluster.waitForClusterToBeReady();
@@ -79,24 +81,29 @@ public class TestCloseContainerHandler {
         cluster.getOzoneManager().lookupKey(keyArgs).getKeyLocationVersions()
             .get(0).getBlocksLatestVersionOnly().get(0);
 
-    long containerID = omKeyLocationInfo.getContainerID();
+    ContainerID containerId = ContainerID.valueof(
+        omKeyLocationInfo.getContainerID());
+    ContainerInfo container = cluster.getStorageContainerManager()
+        .getContainerManager().getContainer(containerId);
+    Pipeline pipeline = cluster.getStorageContainerManager()
+        .getPipelineManager().getPipeline(container.getPipelineID());
 
-    Assert.assertFalse(isContainerClosed(cluster, containerID));
+    Assert.assertFalse(isContainerClosed(cluster, containerId.getId()));
 
     DatanodeDetails datanodeDetails =
         cluster.getHddsDatanodes().get(0).getDatanodeDetails();
     //send the order to close the container
     cluster.getStorageContainerManager().getScmNodeManager()
         .addDatanodeCommand(datanodeDetails.getUuid(),
-            new CloseContainerCommand(containerID,
-                HddsProtos.ReplicationType.STAND_ALONE));
+            new CloseContainerCommand(containerId.getId(), pipeline.getId()));
 
-    GenericTestUtils.waitFor(() -> isContainerClosed(cluster, containerID),
+    GenericTestUtils.waitFor(() ->
+            isContainerClosed(cluster, containerId.getId()),
             500,
             5 * 1000);
 
     //double check if it's really closed (waitFor also throws an exception)
-    Assert.assertTrue(isContainerClosed(cluster, containerID));
+    Assert.assertTrue(isContainerClosed(cluster, containerId.getId()));
   }
 
   private Boolean isContainerClosed(MiniOzoneCluster cluster,

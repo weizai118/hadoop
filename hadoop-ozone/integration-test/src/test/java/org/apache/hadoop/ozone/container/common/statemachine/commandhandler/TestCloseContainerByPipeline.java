@@ -1,19 +1,18 @@
 /**
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with this
+ * work for additional information regarding copyright ownership.  The ASF
+ * licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
  * <p>
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
  */
 
 package org.apache.hadoop.ozone.container.common.statemachine.commandhandler;
@@ -23,17 +22,18 @@ import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
+import org.apache.hadoop.hdds.scm.ScmConfigKeys;
+import org.apache.hadoop.hdds.scm.container.ContainerID;
+import org.apache.hadoop.hdds.scm.container.ContainerInfo;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.ozone.HddsDatanodeService;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
-import org.apache.hadoop.ozone.OzoneConfigKeys;
-import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.client.ObjectStore;
 import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.client.OzoneClientFactory;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.container.common.impl.ContainerData;
-import org.apache.hadoop.ozone.container.ozoneimpl.OzoneContainer;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.hadoop.ozone.protocol.commands.CloseContainerCommand;
@@ -54,22 +54,19 @@ public class TestCloseContainerByPipeline {
   private static OzoneClient client;
   private static ObjectStore objectStore;
 
-
   /**
    * Create a MiniDFSCluster for testing.
    * <p>
-   * Ozone is made active by setting OZONE_ENABLED = true and
-   * OZONE_HANDLER_TYPE_KEY = "distributed"
+   * Ozone is made active by setting OZONE_ENABLED = true
    *
    * @throws IOException
    */
   @BeforeClass
   public static void init() throws Exception {
     conf = new OzoneConfiguration();
-    conf.set(OzoneConfigKeys.OZONE_HANDLER_TYPE_KEY,
-        OzoneConsts.OZONE_HANDLER_DISTRIBUTED);
+    conf.set(ScmConfigKeys.OZONE_SCM_CONTAINER_PROVISION_BATCH_SIZE, "1");
     cluster = MiniOzoneCluster.newBuilder(conf)
-        .setNumDatanodes(3).build();
+        .setNumDatanodes(9).build();
     cluster.waitForClusterToBeReady();
     //the easiest way to create an open container is creating a key
     client = OzoneClientFactory.getClient(conf);
@@ -91,7 +88,7 @@ public class TestCloseContainerByPipeline {
   @Test
   public void testIfCloseContainerCommandHandlerIsInvoked() throws Exception {
     OzoneOutputStream key = objectStore.getVolume("test").getBucket("test")
-        .createKey("testCloseContainer", 1024, ReplicationType.STAND_ALONE,
+        .createKey("standalone", 1024, ReplicationType.RATIS,
             ReplicationFactor.ONE);
     key.write("standalone".getBytes());
     key.close();
@@ -99,19 +96,20 @@ public class TestCloseContainerByPipeline {
     //get the name of a valid container
     OmKeyArgs keyArgs =
         new OmKeyArgs.Builder().setVolumeName("test").setBucketName("test")
-            .setType(HddsProtos.ReplicationType.STAND_ALONE)
+            .setType(HddsProtos.ReplicationType.RATIS)
             .setFactor(HddsProtos.ReplicationFactor.ONE).setDataSize(1024)
-            .setKeyName("testCloseContainer").build();
-
+            .setKeyName("standalone").build();
     OmKeyLocationInfo omKeyLocationInfo =
         cluster.getOzoneManager().lookupKey(keyArgs).getKeyLocationVersions()
             .get(0).getBlocksLatestVersionOnly().get(0);
 
     long containerID = omKeyLocationInfo.getContainerID();
-    List<DatanodeDetails> datanodes = cluster.getStorageContainerManager()
-        .getScmContainerManager().getContainerWithPipeline(containerID)
-        .getPipeline().getMachines();
-    Assert.assertTrue(datanodes.size() == 1);
+    ContainerInfo container = cluster.getStorageContainerManager()
+        .getContainerManager().getContainer(ContainerID.valueof(containerID));
+    Pipeline pipeline = cluster.getStorageContainerManager()
+        .getPipelineManager().getPipeline(container.getPipelineID());
+    List<DatanodeDetails> datanodes = pipeline.getNodes();
+    Assert.assertEquals(datanodes.size(), 1);
 
     DatanodeDetails datanodeDetails = datanodes.get(0);
     HddsDatanodeService datanodeService = null;
@@ -130,23 +128,21 @@ public class TestCloseContainerByPipeline {
     //send the order to close the container
     cluster.getStorageContainerManager().getScmNodeManager()
         .addDatanodeCommand(datanodeDetails.getUuid(),
-            new CloseContainerCommand(containerID,
-                HddsProtos.ReplicationType.STAND_ALONE));
+            new CloseContainerCommand(containerID, pipeline.getId()));
     GenericTestUtils
         .waitFor(() -> isContainerClosed(cluster, containerID, datanodeDetails),
             500, 5 * 1000);
     // Make sure the closeContainerCommandHandler is Invoked
     Assert.assertTrue(
         closeContainerHandler.getInvocationCount() > lastInvocationCount);
-
   }
 
   @Test
-  public void testCloseContainerViaStandaAlone()
+  public void testCloseContainerViaStandAlone()
       throws IOException, TimeoutException, InterruptedException {
 
     OzoneOutputStream key = objectStore.getVolume("test").getBucket("test")
-        .createKey("standalone", 1024, ReplicationType.STAND_ALONE,
+        .createKey("standalone", 1024, ReplicationType.RATIS,
             ReplicationFactor.ONE);
     key.write("standalone".getBytes());
     key.close();
@@ -154,7 +150,7 @@ public class TestCloseContainerByPipeline {
     //get the name of a valid container
     OmKeyArgs keyArgs =
         new OmKeyArgs.Builder().setVolumeName("test").setBucketName("test")
-            .setType(HddsProtos.ReplicationType.STAND_ALONE)
+            .setType(HddsProtos.ReplicationType.RATIS)
             .setFactor(HddsProtos.ReplicationFactor.ONE).setDataSize(1024)
             .setKeyName("standalone").build();
 
@@ -163,36 +159,31 @@ public class TestCloseContainerByPipeline {
             .get(0).getBlocksLatestVersionOnly().get(0);
 
     long containerID = omKeyLocationInfo.getContainerID();
-    List<DatanodeDetails> datanodes = cluster.getStorageContainerManager()
-        .getScmContainerManager().getContainerWithPipeline(containerID)
-        .getPipeline().getMachines();
-    Assert.assertTrue(datanodes.size() == 1);
+    ContainerInfo container = cluster.getStorageContainerManager()
+        .getContainerManager().getContainer(ContainerID.valueof(containerID));
+    Pipeline pipeline = cluster.getStorageContainerManager()
+        .getPipelineManager().getPipeline(container.getPipelineID());
+    List<DatanodeDetails> datanodes = pipeline.getNodes();
+    Assert.assertEquals(datanodes.size(), 1);
 
     DatanodeDetails datanodeDetails = datanodes.get(0);
     Assert
         .assertFalse(isContainerClosed(cluster, containerID, datanodeDetails));
 
-    GenericTestUtils.LogCapturer logCapturer =
-        GenericTestUtils.LogCapturer.captureLogs(OzoneContainer.LOG);
-    //send the order to close the container
+    // Send the order to close the container, give random pipeline id so that
+    // the container will not be closed via RATIS
     cluster.getStorageContainerManager().getScmNodeManager()
         .addDatanodeCommand(datanodeDetails.getUuid(),
-            new CloseContainerCommand(containerID,
-                HddsProtos.ReplicationType.STAND_ALONE));
-
-    GenericTestUtils
-        .waitFor(() -> isContainerClosed(cluster, containerID, datanodeDetails),
-            500, 5 * 1000);
+            new CloseContainerCommand(containerID, PipelineID.randomId()));
 
     //double check if it's really closed (waitFor also throws an exception)
-    Assert.assertTrue(isContainerClosed(cluster, containerID, datanodeDetails));
-    Assert.assertTrue(logCapturer.getOutput().contains(
-        "submitting CloseContainer request over STAND_ALONE server for"
-            + " container " + containerID));
-    // Make sure it was really closed via StandAlone not Ratis server
-    Assert.assertFalse((logCapturer.getOutput().contains(
-        "submitting CloseContainer request over RATIS server for container "
-            + containerID)));
+    // TODO: change the below line after implementing QUASI_CLOSED to CLOSED
+    // logic. The container will be QUASI closed as of now
+    GenericTestUtils
+        .waitFor(() -> isContainerQuasiClosed(
+            cluster, containerID, datanodeDetails), 500, 5 * 1000);
+    Assert.assertTrue(
+        isContainerQuasiClosed(cluster, containerID, datanodeDetails));
   }
 
   @Test
@@ -216,49 +207,56 @@ public class TestCloseContainerByPipeline {
             .get(0).getBlocksLatestVersionOnly().get(0);
 
     long containerID = omKeyLocationInfo.getContainerID();
-    List<DatanodeDetails> datanodes = cluster.getStorageContainerManager()
-        .getScmContainerManager().getContainerWithPipeline(containerID)
-        .getPipeline().getMachines();
-    Assert.assertTrue(datanodes.size() == 3);
-
-    GenericTestUtils.LogCapturer logCapturer =
-        GenericTestUtils.LogCapturer.captureLogs(OzoneContainer.LOG);
+    ContainerInfo container = cluster.getStorageContainerManager()
+        .getContainerManager().getContainer(ContainerID.valueof(containerID));
+    Pipeline pipeline = cluster.getStorageContainerManager()
+        .getPipelineManager().getPipeline(container.getPipelineID());
+    List<DatanodeDetails> datanodes = pipeline.getNodes();
+    Assert.assertEquals(3, datanodes.size());
 
     for (DatanodeDetails details : datanodes) {
       Assert.assertFalse(isContainerClosed(cluster, containerID, details));
       //send the order to close the container
       cluster.getStorageContainerManager().getScmNodeManager()
           .addDatanodeCommand(details.getUuid(),
-              new CloseContainerCommand(containerID,
-                  HddsProtos.ReplicationType.RATIS));
+              new CloseContainerCommand(containerID, pipeline.getId()));
     }
-
+    // Make sure that it is CLOSED
     for (DatanodeDetails datanodeDetails : datanodes) {
       GenericTestUtils.waitFor(
           () -> isContainerClosed(cluster, containerID, datanodeDetails), 500,
           15 * 1000);
       //double check if it's really closed (waitFor also throws an exception)
-      Assert.assertTrue(isContainerClosed(cluster, containerID, datanodeDetails));
+      Assert.assertTrue(isContainerClosed(cluster,
+          containerID, datanodeDetails));
     }
-    Assert.assertFalse(logCapturer.getOutput().contains(
-        "submitting CloseContainer request over STAND_ALONE "
-            + "server for container " + containerID));
-    // Make sure it was really closed via StandAlone not Ratis server
-    Assert.assertTrue((logCapturer.getOutput().contains(
-        "submitting CloseContainer request over RATIS server for container "
-            + containerID)));
   }
 
   private Boolean isContainerClosed(MiniOzoneCluster cluster, long containerID,
       DatanodeDetails datanode) {
     ContainerData containerData;
-    for (HddsDatanodeService datanodeService : cluster.getHddsDatanodes())
+    for (HddsDatanodeService datanodeService : cluster.getHddsDatanodes()) {
       if (datanode.equals(datanodeService.getDatanodeDetails())) {
         containerData =
             datanodeService.getDatanodeStateMachine().getContainer()
                 .getContainerSet().getContainer(containerID).getContainerData();
-        return !containerData.isOpen();
+        return containerData.isClosed();
       }
+    }
+    return false;
+  }
+
+  private Boolean isContainerQuasiClosed(MiniOzoneCluster miniCluster,
+      long containerID, DatanodeDetails datanode) {
+    ContainerData containerData;
+    for (HddsDatanodeService datanodeService : miniCluster.getHddsDatanodes()) {
+      if (datanode.equals(datanodeService.getDatanodeDetails())) {
+        containerData =
+            datanodeService.getDatanodeStateMachine().getContainer()
+                .getContainerSet().getContainer(containerID).getContainerData();
+        return containerData.isQuasiClosed();
+      }
+    }
     return false;
   }
 }

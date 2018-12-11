@@ -18,60 +18,43 @@
 
 package org.apache.hadoop.ozone.web.ozShell.keys;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.hadoop.ozone.client.OzoneClientException;
-import org.apache.hadoop.ozone.client.OzoneClientUtils;
 import org.apache.hadoop.ozone.client.OzoneBucket;
-import org.apache.hadoop.ozone.client.OzoneKey;
+import org.apache.hadoop.ozone.client.OzoneClient;
+import org.apache.hadoop.ozone.client.OzoneClientUtils;
+import org.apache.hadoop.ozone.client.OzoneKeyDetails;
 import org.apache.hadoop.ozone.client.OzoneVolume;
-import org.apache.hadoop.ozone.client.rest.OzoneException;
 import org.apache.hadoop.ozone.web.ozShell.Handler;
+import org.apache.hadoop.ozone.web.ozShell.OzoneAddress;
 import org.apache.hadoop.ozone.web.ozShell.Shell;
 import org.apache.hadoop.ozone.web.utils.JsonUtils;
+
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
 
 /**
  * Executes Info Object.
  */
+@Command(name = "info",
+    description = "returns information about an existing key")
 public class InfoKeyHandler extends Handler {
-  private String volumeName;
-  private String bucketName;
-  private String keyName;
 
+  @Parameters(arity = "1..1", description = Shell.OZONE_KEY_URI_DESCRIPTION)
+  private String uri;
   /**
    * Executes the Client Calls.
-   *
-   * @param cmd - CommandLine
-   * @throws IOException
-   * @throws OzoneException
-   * @throws URISyntaxException
    */
   @Override
-  protected void execute(CommandLine cmd)
-      throws IOException, OzoneException, URISyntaxException {
-    if (!cmd.hasOption(Shell.INFO_KEY)) {
-      throw new OzoneClientException("Incorrect call : infoKey is missing");
-    }
+  public Void call() throws Exception {
 
-    String ozoneURIString = cmd.getOptionValue(Shell.INFO_KEY);
-    URI ozoneURI = verifyURI(ozoneURIString);
-    Path path = Paths.get(ozoneURI.getPath());
-    if (path.getNameCount() < 3) {
-      throw new OzoneClientException(
-          "volume/bucket/key name required in infoKey");
-    }
+    OzoneAddress address = new OzoneAddress(uri);
+    address.ensureKeyAddress();
+    OzoneClient client = address.createClient(createOzoneConfiguration());
 
-    volumeName = path.getName(0).toString();
-    bucketName = path.getName(1).toString();
-    keyName = path.getName(2).toString();
+    String volumeName = address.getVolumeName();
+    String bucketName = address.getBucketName();
+    String keyName = address.getKeyName();
 
-
-    if (cmd.hasOption(Shell.VERBOSE)) {
+    if (isVerbose()) {
       System.out.printf("Volume Name : %s%n", volumeName);
       System.out.printf("Bucket Name : %s%n", bucketName);
       System.out.printf("Key Name : %s%n", keyName);
@@ -79,9 +62,10 @@ public class InfoKeyHandler extends Handler {
 
     OzoneVolume vol = client.getObjectStore().getVolume(volumeName);
     OzoneBucket bucket = vol.getBucket(bucketName);
-    OzoneKey key = bucket.getKey(keyName);
+    OzoneKeyDetails key = bucket.getKey(keyName);
 
     System.out.printf("%s%n", JsonUtils.toJsonStringWithDefaultPrettyPrinter(
-        JsonUtils.toJsonString(OzoneClientUtils.asKeyInfo(key))));
+        JsonUtils.toJsonString(OzoneClientUtils.asKeyInfoDetails(key))));
+    return null;
   }
 }

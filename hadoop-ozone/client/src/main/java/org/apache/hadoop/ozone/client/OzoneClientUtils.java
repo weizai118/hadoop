@@ -20,10 +20,10 @@ package org.apache.hadoop.ozone.client;
 import org.apache.hadoop.hdds.client.OzoneQuota;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
 import org.apache.hadoop.ozone.OzoneConsts;
-import org.apache.hadoop.ozone.client.rest.response.BucketInfo;
-import org.apache.hadoop.ozone.client.rest.response.KeyInfo;
-import org.apache.hadoop.ozone.client.rest.response.VolumeInfo;
-import org.apache.hadoop.ozone.client.rest.response.VolumeOwner;
+import org.apache.hadoop.ozone.client.rest.response.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** A utility class for OzoneClient. */
 public final class OzoneClientUtils {
@@ -82,6 +82,28 @@ public final class OzoneClientUtils {
     keyInfo.setModifiedOn(
         HddsClientUtils.formatDateTime(key.getModificationTime()));
     keyInfo.setSize(key.getDataSize());
+    return keyInfo;
+  }
+
+  /**
+   * Returns a KeyInfoDetails object constructed using fields of the input
+   * OzoneKeyDetails object.
+   *
+   * @param key OzoneKeyDetails instance from which KeyInfo object needs to
+   *            be created.
+   * @return KeyInfoDetails instance
+   */
+  public static KeyInfoDetails asKeyInfoDetails(OzoneKeyDetails key) {
+    KeyInfoDetails keyInfo = new KeyInfoDetails();
+    keyInfo.setKeyName(key.getName());
+    keyInfo.setCreatedOn(HddsClientUtils.formatDateTime(key.getCreationTime()));
+    keyInfo.setModifiedOn(
+        HddsClientUtils.formatDateTime(key.getModificationTime()));
+    keyInfo.setSize(key.getDataSize());
+    List<KeyLocation> keyLocations = new ArrayList<>();
+    key.getOzoneKeyLocations().forEach((a) -> keyLocations.add(new KeyLocation(
+        a.getContainerID(), a.getLocalID(), a.getLength(), a.getOffset())));
+    keyInfo.setKeyLocation(keyLocations);
     return keyInfo;
   }
 }

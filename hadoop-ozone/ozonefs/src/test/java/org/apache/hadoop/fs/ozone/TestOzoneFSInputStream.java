@@ -19,6 +19,7 @@
 package org.apache.hadoop.fs.ozone;
 
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -57,15 +58,15 @@ public class TestOzoneFSInputStream {
   /**
    * Create a MiniDFSCluster for testing.
    * <p>
-   * Ozone is made active by setting OZONE_ENABLED = true and
-   * OZONE_HANDLER_TYPE_KEY = "distributed"
+   * Ozone is made active by setting OZONE_ENABLED = true
    *
    * @throws IOException
    */
   @BeforeClass
   public static void init() throws Exception {
     OzoneConfiguration conf = new OzoneConfiguration();
-    conf.setLong(OzoneConfigKeys.OZONE_SCM_BLOCK_SIZE_IN_MB, 10);
+    conf.setStorageSize(OzoneConfigKeys.OZONE_SCM_BLOCK_SIZE, 10,
+        StorageUnit.MB);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(10)
         .build();
@@ -90,9 +91,6 @@ public class TestOzoneFSInputStream {
     // Fetch the host and port for File System init
     DatanodeDetails datanodeDetails = cluster.getHddsDatanodes().get(0)
         .getDatanodeDetails();
-    int port = datanodeDetails
-        .getPort(DatanodeDetails.Port.Name.REST).getValue();
-    String host = datanodeDetails.getHostName();
 
     // Set the fs.defaultFS and start the filesystem
     String uri = String.format("%s://%s.%s/",

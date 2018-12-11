@@ -31,7 +31,8 @@ import org.apache.hadoop.security.KerberosInfo;
 
 /*****************************************************************************
  * Protocol that a secondary NameNode uses to communicate with the NameNode.
- * It's used to get part of the name node state
+ * Also used by external storage policy satisfier. It's used to get part of the
+ * name node state
  *****************************************************************************/
 @KerberosInfo(
     serverPrincipal = DFSConfigKeys.DFS_NAMENODE_KERBEROS_PRINCIPAL_KEY)
@@ -72,7 +73,7 @@ public interface NamenodeProtocol {
    * @param datanode  a data node
    * @param size      requested size
    * @param minBlockSize each block should be of this minimum Block Size
-   * @return          a list of blocks & their locations
+   * @return BlocksWithLocations a list of blocks &amp; their locations
    * @throws IOException if size is less than or equal to 0 or
   datanode does not exist
    */
@@ -182,7 +183,8 @@ public interface NamenodeProtocol {
   /**
    * Return a structure containing details about all edit logs
    * available to be fetched from the NameNode.
-   * @param sinceTxId return only logs that contain transactions >= sinceTxId
+   * @param sinceTxId return only logs that contain transactions {@literal >=}
+   * sinceTxId
    */
   @Idempotent
   public RemoteEditLogManifest getEditLogManifest(long sinceTxId)
@@ -202,5 +204,12 @@ public interface NamenodeProtocol {
    */
   @Idempotent
   boolean isRollingUpgrade() throws IOException;
+
+  /**
+   * @return Gets the next available sps path, otherwise null. This API used
+   *         by External SPS.
+   */
+  @AtMostOnce
+  Long getNextSPSPath() throws IOException;
 }
 

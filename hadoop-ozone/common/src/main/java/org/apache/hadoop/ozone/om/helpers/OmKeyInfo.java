@@ -17,14 +17,16 @@
  */
 package org.apache.hadoop.ozone.om.helpers;
 
-import com.google.common.base.Preconditions;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.KeyInfo;
 import org.apache.hadoop.util.Time;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.stream.Collectors;
+import com.google.common.base.Preconditions;
 
 /**
  * Args for key block. The block instance for the key requested in putKey.
@@ -45,7 +47,8 @@ public final class OmKeyInfo {
 
   private OmKeyInfo(String volumeName, String bucketName, String keyName,
                     List<OmKeyLocationInfoGroup> versions, long dataSize,
-                    long creationTime, long modificationTime, HddsProtos.ReplicationType type,
+                    long creationTime, long modificationTime,
+                    HddsProtos.ReplicationType type,
                     HddsProtos.ReplicationFactor factor) {
     this.volumeName = volumeName;
     this.bucketName = bucketName;
@@ -101,8 +104,7 @@ public final class OmKeyInfo {
     this.dataSize = size;
   }
 
-  public synchronized OmKeyLocationInfoGroup getLatestVersionLocations()
-      throws IOException {
+  public synchronized OmKeyLocationInfoGroup getLatestVersionLocations() {
     return keyLocationVersions.size() == 0? null :
         keyLocationVersions.get(keyLocationVersions.size() - 1);
   }
@@ -113,6 +115,32 @@ public final class OmKeyInfo {
 
   public void updateModifcationTime() {
     this.modificationTime = Time.monotonicNow();
+  }
+
+  /**
+   * updates the length of the each block in the list given.
+   * This will be called when the key is being committed to OzoneManager.
+   *
+   * @param locationInfoList list of locationInfo
+   */
+  public void updateLocationInfoList(List<OmKeyLocationInfo> locationInfoList) {
+    long latestVersion = getLatestVersionLocations().getVersion();
+    OmKeyLocationInfoGroup keyLocationInfoGroup = getLatestVersionLocations();
+    List<OmKeyLocationInfo> currentList =
+        keyLocationInfoGroup.getLocationList();
+    List<OmKeyLocationInfo> latestVersionList =
+        keyLocationInfoGroup.getBlocksLatestVersionOnly();
+    // Updates the latest locationList in the latest version only with
+    // given locationInfoList here.
+    // TODO : The original allocated list and the updated list here may vary
+    // as the containers on the Datanode on which the blocks were pre allocated
+    // might get closed. The diff of blocks between these two lists here
+    // need to be garbage collected in case the ozone client dies.
+    currentList.removeAll(latestVersionList);
+    // set each of the locationInfo object to the latest version
+    locationInfoList.stream().forEach(omKeyLocationInfo -> omKeyLocationInfo
+        .setCreateVersion(latestVersion));
+    currentList.addAll(locationInfoList);
   }
 
   /**
@@ -181,7 +209,8 @@ public final class OmKeyInfo {
     private String bucketName;
     private String keyName;
     private long dataSize;
-    private List<OmKeyLocationInfoGroup> omKeyLocationInfoGroups;
+    private List<OmKeyLocationInfoGroup> omKeyLocationInfoGroups =
+        new ArrayList<>();
     private long creationTime;
     private long modificationTime;
     private HddsProtos.ReplicationType type;
@@ -223,13 +252,13 @@ public final class OmKeyInfo {
       return this;
     }
 
-    public Builder setReplicationFactor(HddsProtos.ReplicationFactor factor) {
-      this.factor = factor;
+    public Builder setReplicationFactor(HddsProtos.ReplicationFactor replFact) {
+      this.factor = replFact;
       return this;
     }
 
-    public Builder setReplicationType(HddsProtos.ReplicationType type) {
-      this.type = type;
+    public Builder setReplicationType(HddsProtos.ReplicationType replType) {
+      this.type = replType;
       return this;
     }
 

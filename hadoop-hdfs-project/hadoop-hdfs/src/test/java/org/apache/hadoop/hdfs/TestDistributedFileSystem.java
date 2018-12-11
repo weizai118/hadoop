@@ -100,12 +100,12 @@ import org.apache.hadoop.test.Whitebox;
 import org.apache.hadoop.util.DataChecksum;
 import org.apache.hadoop.util.Time;
 import org.apache.hadoop.util.concurrent.HadoopExecutors;
-import org.apache.log4j.Level;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.InOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 
 public class TestDistributedFileSystem {
   private static final Random RAN = new Random();
@@ -113,7 +113,8 @@ public class TestDistributedFileSystem {
       TestDistributedFileSystem.class);
 
   static {
-    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.ALL);
+    GenericTestUtils.setLogLevel(DFSClient.LOG, Level.TRACE);
+    GenericTestUtils.setLogLevel(LeaseRenewer.LOG, Level.DEBUG);
   }
 
   private boolean dualPortTesting = false;
@@ -706,6 +707,7 @@ public class TestDistributedFileSystem {
       // Iterative ls test
       long mkdirOp = getOpStatistics(OpType.MKDIRS);
       long listStatusOp = getOpStatistics(OpType.LIST_STATUS);
+      long locatedListStatusOP = getOpStatistics(OpType.LIST_LOCATED_STATUS);
       for (int i = 0; i < 10; i++) {
         Path p = new Path(dir, Integer.toString(i));
         fs.mkdirs(p);
@@ -729,6 +731,12 @@ public class TestDistributedFileSystem {
         checkStatistics(fs, readOps, ++writeOps, largeReadOps);
         checkOpStatistics(OpType.MKDIRS, mkdirOp);
         checkOpStatistics(OpType.LIST_STATUS, listStatusOp);
+
+        fs.listLocatedStatus(dir);
+        locatedListStatusOP++;
+        readOps++;
+        checkStatistics(fs, readOps, writeOps, largeReadOps);
+        checkOpStatistics(OpType.LIST_LOCATED_STATUS, locatedListStatusOP);
       }
       
       opCount = getOpStatistics(OpType.GET_STATUS);
@@ -765,7 +773,68 @@ public class TestDistributedFileSystem {
     } finally {
       if (cluster != null) cluster.shutdown();
     }
-    
+  }
+
+  @Test
+  public void testECStatistics() throws IOException {
+    try (MiniDFSCluster cluster =
+        new MiniDFSCluster.Builder(getTestConfiguration()).build()) {
+      cluster.waitActive();
+      final DistributedFileSystem dfs = cluster.getFileSystem();
+      Path dir = new Path("/test");
+      dfs.mkdirs(dir);
+      int readOps = 0;
+      int writeOps = 0;
+      FileSystem.clearStatistics();
+
+      long opCount = getOpStatistics(OpType.ENABLE_EC_POLICY);
+      dfs.enableErasureCodingPolicy("RS-10-4-1024k");
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.ENABLE_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.SET_EC_POLICY);
+      dfs.setErasureCodingPolicy(dir, "RS-10-4-1024k");
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.SET_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.GET_EC_POLICY);
+      dfs.getErasureCodingPolicy(dir);
+      checkStatistics(dfs, ++readOps, writeOps, 0);
+      checkOpStatistics(OpType.GET_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.UNSET_EC_POLICY);
+      dfs.unsetErasureCodingPolicy(dir);
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.UNSET_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.GET_EC_POLICIES);
+      dfs.getAllErasureCodingPolicies();
+      checkStatistics(dfs, ++readOps, writeOps, 0);
+      checkOpStatistics(OpType.GET_EC_POLICIES, opCount + 1);
+
+      opCount = getOpStatistics(OpType.GET_EC_CODECS);
+      dfs.getAllErasureCodingCodecs();
+      checkStatistics(dfs, ++readOps, writeOps, 0);
+      checkOpStatistics(OpType.GET_EC_CODECS, opCount + 1);
+
+      ErasureCodingPolicy newPolicy =
+          new ErasureCodingPolicy(new ECSchema("rs", 5, 3), 1024 * 1024);
+
+      opCount = getOpStatistics(OpType.ADD_EC_POLICY);
+      dfs.addErasureCodingPolicies(new ErasureCodingPolicy[] {newPolicy});
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.ADD_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.REMOVE_EC_POLICY);
+      dfs.removeErasureCodingPolicy("RS-5-3-1024k");
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.REMOVE_EC_POLICY, opCount + 1);
+
+      opCount = getOpStatistics(OpType.DISABLE_EC_POLICY);
+      dfs.disableErasureCodingPolicy("RS-10-4-1024k");
+      checkStatistics(dfs, readOps, ++writeOps, 0);
+      checkOpStatistics(OpType.DISABLE_EC_POLICY, opCount + 1);
+    }
   }
 
   @SuppressWarnings("ThrowableResultOfMethodCallIgnored")

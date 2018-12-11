@@ -1,4 +1,4 @@
-/**
+ /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -23,6 +23,8 @@ import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hdds.client.ReplicationFactor;
 import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
+
+import org.apache.ratis.proto.RaftProtos.ReplicationLevel;
 import org.apache.ratis.util.TimeDuration;
 
 /**
@@ -50,6 +52,9 @@ public final class OzoneConfigKeys {
   public static final boolean DFS_CONTAINER_IPC_RANDOM_PORT_DEFAULT =
       false;
 
+  public static final String DFS_CONTAINER_CHUNK_WRITE_SYNC_KEY =
+      "dfs.container.chunk.write.sync";
+  public static final boolean DFS_CONTAINER_CHUNK_WRITE_SYNC_DEFAULT = true;
   /**
    * Ratis Port where containers listen to.
    */
@@ -65,22 +70,12 @@ public final class OzoneConfigKeys {
       "dfs.container.ratis.ipc.random.port";
   public static final boolean DFS_CONTAINER_RATIS_IPC_RANDOM_PORT_DEFAULT =
       false;
-
-  public static final String OZONE_LOCALSTORAGE_ROOT =
-      "ozone.localstorage.root";
-  public static final String OZONE_LOCALSTORAGE_ROOT_DEFAULT = "/tmp/ozone";
   public static final String OZONE_ENABLED =
       "ozone.enabled";
   public static final boolean OZONE_ENABLED_DEFAULT = false;
-  public static final String OZONE_HANDLER_TYPE_KEY =
-      "ozone.handler.type";
-  public static final String OZONE_HANDLER_TYPE_DEFAULT = "distributed";
   public static final String OZONE_TRACE_ENABLED_KEY =
       "ozone.trace.enabled";
   public static final boolean OZONE_TRACE_ENABLED_DEFAULT = false;
-
-  public static final String OZONE_METADATA_DIRS =
-      "ozone.metadata.dirs";
 
   public static final String OZONE_METADATA_STORE_IMPL =
       "ozone.metastore.impl";
@@ -95,7 +90,7 @@ public final class OzoneConfigKeys {
       "ozone.metastore.rocksdb.statistics";
 
   public static final String  OZONE_METADATA_STORE_ROCKSDB_STATISTICS_DEFAULT =
-      "ALL";
+      "OFF";
   public static final String OZONE_METADATA_STORE_ROCKSDB_STATISTICS_OFF =
       "OFF";
 
@@ -103,9 +98,9 @@ public final class OzoneConfigKeys {
       "ozone.container.cache.size";
   public static final int OZONE_CONTAINER_CACHE_DEFAULT = 1024;
 
-  public static final String OZONE_SCM_BLOCK_SIZE_IN_MB =
-      "ozone.scm.block.size.in.mb";
-  public static final long OZONE_SCM_BLOCK_SIZE_DEFAULT = 256;
+  public static final String OZONE_SCM_BLOCK_SIZE =
+      "ozone.scm.block.size";
+  public static final String OZONE_SCM_BLOCK_SIZE_DEFAULT = "256MB";
 
   /**
    * Ozone administrator users delimited by comma.
@@ -119,6 +114,24 @@ public final class OzoneConfigKeys {
 
   public static final String OZONE_CLIENT_PROTOCOL =
       "ozone.client.protocol";
+
+  public static final String OZONE_CLIENT_STREAM_BUFFER_FLUSH_SIZE =
+      "ozone.client.stream.buffer.flush.size";
+
+  public static final String OZONE_CLIENT_STREAM_BUFFER_FLUSH_SIZE_DEFAULT =
+      "64MB";
+
+  public static final String OZONE_CLIENT_STREAM_BUFFER_MAX_SIZE =
+      "ozone.client.stream.buffer.max.size";
+
+  public static final String OZONE_CLIENT_STREAM_BUFFER_MAX_SIZE_DEFAULT =
+      "128MB";
+
+  public static final String OZONE_CLIENT_WATCH_REQUEST_TIMEOUT =
+      "ozone.client.watch.request.timeout";
+
+  public static final String OZONE_CLIENT_WATCH_REQUEST_TIMEOUT_DEFAULT =
+      "30s";
 
   // This defines the overall connection limit for the connection pool used in
   // RestClient.
@@ -212,16 +225,42 @@ public final class OzoneConfigKeys {
       = ScmConfigKeys.DFS_CONTAINER_RATIS_NUM_WRITE_CHUNK_THREADS_KEY;
   public static final int DFS_CONTAINER_RATIS_NUM_WRITE_CHUNK_THREADS_DEFAULT
       = ScmConfigKeys.DFS_CONTAINER_RATIS_NUM_WRITE_CHUNK_THREADS_DEFAULT;
+  public static final String DFS_CONTAINER_RATIS_REPLICATION_LEVEL_KEY
+      = ScmConfigKeys.DFS_CONTAINER_RATIS_REPLICATION_LEVEL_KEY;
+  public static final ReplicationLevel
+      DFS_CONTAINER_RATIS_REPLICATION_LEVEL_DEFAULT
+      = ScmConfigKeys.DFS_CONTAINER_RATIS_REPLICATION_LEVEL_DEFAULT;
+  public static final String DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_KEY
+      = ScmConfigKeys.DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_KEY;
+  public static final int DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_DEFAULT
+      = ScmConfigKeys.DFS_CONTAINER_RATIS_NUM_CONTAINER_OP_EXECUTORS_DEFAULT;
   public static final String DFS_CONTAINER_RATIS_SEGMENT_SIZE_KEY
       = ScmConfigKeys.DFS_CONTAINER_RATIS_SEGMENT_SIZE_KEY;
-  public static final int DFS_CONTAINER_RATIS_SEGMENT_SIZE_DEFAULT
+  public static final String DFS_CONTAINER_RATIS_SEGMENT_SIZE_DEFAULT
       = ScmConfigKeys.DFS_CONTAINER_RATIS_SEGMENT_SIZE_DEFAULT;
   public static final String DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_KEY
       = ScmConfigKeys.DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_KEY;
-  public static final int DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT
-      = ScmConfigKeys.DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT;
-  public static final int DFS_CONTAINER_CHUNK_MAX_SIZE
-      = ScmConfigKeys.OZONE_SCM_CHUNK_MAX_SIZE;
+  public static final String
+      DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_SEGMENT_PREALLOCATED_SIZE_DEFAULT;
+
+  // config settings to enable stateMachineData write timeout
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT;
+  public static final TimeDuration
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT_DEFAULT =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_TIMEOUT_DEFAULT;
+
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL =
+      ScmConfigKeys.
+          DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL;
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL_DEFAULT =
+      ScmConfigKeys.
+          DFS_CONTAINER_RATIS_STATEMACHINEDATA_CACHE_EXPIRY_INTERVAL_DEFAULT;
+
   public static final String DFS_CONTAINER_RATIS_DATANODE_STORAGE_DIR =
       "dfs.container.ratis.datanode.storage.dir";
   public static final String DFS_RATIS_CLIENT_REQUEST_TIMEOUT_DURATION_KEY =
@@ -229,11 +268,51 @@ public final class OzoneConfigKeys {
   public static final TimeDuration
       DFS_RATIS_CLIENT_REQUEST_TIMEOUT_DURATION_DEFAULT =
       ScmConfigKeys.DFS_RATIS_CLIENT_REQUEST_TIMEOUT_DURATION_DEFAULT;
+  public static final String DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_KEY =
+      ScmConfigKeys.DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_KEY;
+  public static final int DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_CLIENT_REQUEST_MAX_RETRIES_DEFAULT;
+  public static final String DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_KEY =
+      ScmConfigKeys.DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_KEY;
+  public static final TimeDuration
+      DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_CLIENT_REQUEST_RETRY_INTERVAL_DEFAULT;
+  public static final String DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_KEY =
+      ScmConfigKeys.DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_KEY;
+  public static final TimeDuration
+      DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_SERVER_RETRY_CACHE_TIMEOUT_DURATION_DEFAULT;
+  public static final String
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES;
+  public static final int
+      DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES_DEFAULT =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_STATEMACHINEDATA_SYNC_RETRIES_DEFAULT;
+  public static final String DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE;
+  public static final int DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE_DEFAULT =
+      ScmConfigKeys.DFS_CONTAINER_RATIS_LOG_QUEUE_SIZE_DEFAULT;
   public static final String DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_KEY =
       ScmConfigKeys.DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_KEY;
   public static final TimeDuration
       DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_DEFAULT =
       ScmConfigKeys.DFS_RATIS_SERVER_REQUEST_TIMEOUT_DURATION_DEFAULT;
+  public static final String
+      DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_KEY =
+      ScmConfigKeys.DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_KEY;
+  public static final TimeDuration
+      DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_DEFAULT;
+  public static final String DFS_RATIS_SNAPSHOT_THRESHOLD_KEY =
+      ScmConfigKeys.DFS_RATIS_SNAPSHOT_THRESHOLD_KEY;
+  public static final long DFS_RATIS_SNAPSHOT_THRESHOLD_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_SNAPSHOT_THRESHOLD_DEFAULT;
+
+  public static final String DFS_RATIS_SERVER_FAILURE_DURATION_KEY =
+      ScmConfigKeys.DFS_RATIS_SERVER_FAILURE_DURATION_KEY;
+  public static final TimeDuration
+      DFS_RATIS_SERVER_FAILURE_DURATION_DEFAULT =
+      ScmConfigKeys.DFS_RATIS_SERVER_FAILURE_DURATION_DEFAULT;
 
   public static final String OZONE_SCM_WEB_AUTHENTICATION_KERBEROS_PRINCIPAL =
       "ozone.web.authentication.kerberos.principal";
@@ -252,16 +331,29 @@ public final class OzoneConfigKeys {
   public static final double
       HDDS_DATANODE_STORAGE_UTILIZATION_CRITICAL_THRESHOLD_DEFAULT = 0.75;
 
-  public static final String
-      HDDS_WRITE_LOCK_REPORTING_THRESHOLD_MS_KEY =
-      "hdds.write.lock.reporting.threshold.ms";
-  public static final long
-      HDDS_WRITE_LOCK_REPORTING_THRESHOLD_MS_DEFAULT = 5000L;
-  public static final String
-      HDDS_LOCK_SUPPRESS_WARNING_INTERVAL_MS_KEY =
-      "hdds.lock.suppress.warning.interval.ms";
-  public static final long
-      HDDS_LOCK_SUPPRESS_WARNING_INTERVAL_MS_DEAFULT = 10000L;
+  public static final String OZONE_CONTAINER_COPY_WORKDIR =
+      "hdds.datanode.replication.work.dir";
+
+  /**
+   * Config properties to set client side checksum properties.
+   */
+  public static final String OZONE_CLIENT_CHECKSUM_TYPE =
+      "ozone.client.checksum.type";
+  public static final String OZONE_CLIENT_CHECKSUM_TYPE_DEFAULT = "SHA256";
+  public static final String OZONE_CLIENT_BYTES_PER_CHECKSUM =
+      "ozone.client.bytes.per.checksum";
+  public static final String OZONE_CLIENT_BYTES_PER_CHECKSUM_DEFAULT = "1MB";
+  public static final int OZONE_CLIENT_BYTES_PER_CHECKSUM_DEFAULT_BYTES =
+      1024 * 1024;
+  public static final int OZONE_CLIENT_BYTES_PER_CHECKSUM_MIN_SIZE = 256 * 1024;
+  public static final String OZONE_ACL_AUTHORIZER_CLASS =
+      "ozone.acl.authorizer.class";
+  public static final String OZONE_ACL_AUTHORIZER_CLASS_DEFAULT =
+      "org.apache.hadoop.ozone.security.acl.OzoneAccessAuthorizer";
+  public static final String OZONE_ACL_ENABLED =
+      "ozone.acl.enabled";
+  public static final boolean OZONE_ACL_ENABLED_DEFAULT =
+      false;
 
   /**
    * There is no need to instantiate this class.

@@ -228,6 +228,7 @@ One or more components of the service. If the service is HBase say, then the com
 |launch_command|The custom launch command of this component (optional for DOCKER component, required otherwise). When specified at the component level, it overrides the value specified at the global level (if any). If docker image supports ENTRYPOINT, launch_command is delimited by comma(,) instead of space.|false|string||
 |resource|Resource of this component (optional). If not specified, the service level global resource takes effect.|false|Resource||
 |number_of_containers|Number of containers for this component (optional). If not specified, the service level global number_of_containers takes effect.|false|integer (int64)||
+|decommissioned_instances|List of decommissioned component instances.|false|string array||
 |containers|Containers of a started component. Specifying a value for this attribute for the POST payload raises a validation error. This blob is available only in the GET response of a started service.|false|Container array||
 |run_privileged_container|Run all containers of this component in privileged mode (YARN-4262).|false|boolean||
 |placement_policy|Advanced scheduling and placement policies for all containers of this component.|false|PlacementPolicy||
@@ -252,7 +253,7 @@ A config file that needs to be created and made available as a volume in a servi
 
 |Name|Description|Required|Schema|Default|
 |----|----|----|----|----|
-|type|Config file in the standard format like xml, properties, json, yaml, template or static/archive resource files. When static/archive types are specified, file must be uploaded to remote file system before launching the job, and YARN service framework will localize files prior to launching containers. Archive files are unwrapped during localization |false|enum (XML, PROPERTIES, JSON, YAML, TEMPLATE, ENV, HADOOP_XML, STATIC, ARCHIVE)||
+|type|Config file in the standard format like xml, properties, json, yaml, template or static/archive resource files. When static/archive types are specified, file must be uploaded to remote file system before launching the job, and YARN service framework will localize files prior to launching containers. Archive files are unwrapped during localization |false|enum (XML, PROPERTIES, JSON, YAML, TEMPLATE, HADOOP_XML, STATIC, ARCHIVE)||
 |dest_file|The path that this configuration file should be created as. If it is an absolute path, it will be mounted into the DOCKER container. Absolute paths are only allowed for DOCKER containers.  If it is a relative path, only the file name should be provided, and the file will be created in the container local working directory under a folder named conf for all types other than static/archive. For static/archive resource types, the files are available under resources directory.|false|string||
 |src_file|This provides the source location of the configuration file, the content of which is dumped to dest_file post property substitutions, in the format as specified in type. Typically the src_file would point to a source controlled network accessible file maintained by tools like puppet, chef, or hdfs etc. Currently, only hdfs is supported.|false|string||
 |properties|A blob of key value pairs that will be dumped in the dest_file in the format as specified in type. If src_file is specified, src_file content are dumped in the dest_file and these properties will overwrite, if any, existing properties in src_file or be added as new properties in src_file.|false|object||
@@ -371,7 +372,7 @@ Resource determines the amount of resources (vcores, memory, network, etc.) usab
 |profile|Each resource profile has a unique id which is associated with a cluster-level predefined memory, cpus, etc.|false|string||
 |cpus|Amount of vcores allocated to each container (optional but overrides cpus in profile if specified).|false|integer (int32)||
 |memory|Amount of memory allocated to each container (optional but overrides memory in profile if specified). Currently accepts only an integer value and default unit is in MB.|false|string||
-|additional|A map of resource type name to resource type information. Including value (integer), and unit (string). This will be used to specify resource other than cpu and memory. Please refer to example below.|false|object||
+|additional|A map of resource type name to resource type information. Including value (integer), unit (string) and optional attributes (map). This will be used to specify resource other than cpu and memory. Please refer to example below.|false|object||
 
 
 ### ResourceInformation
@@ -406,7 +407,7 @@ a service resource has the following attributes.
 |queue|The YARN queue that this service should be submitted to.|false|string||
 |kerberos_principal|The principal info of the user who launches the service|false|KerberosPrincipal||
 |docker_client_config|URI of the file containing the docker client configuration (e.g. hdfs:///tmp/config.json)|false|string||
-
+|dependencies|A list of service names that this service depends on.| false | string array ||
 
 ### ServiceState
 
